@@ -16,14 +16,14 @@ ggp-client download --ext dta        # only Stata files (dta, sav, csv; one or s
 ggp-client download --metadata       # also keep documentation and other non-data files
 ggp-client download --ids 3-12,20 --all-versions
 
-ggp-client preprocess --project ggs  # downloaded data files as parquet in ggp_data/preprocessed
-ggp-client consolidate --project ggs # stacked per round and wave in ggp_data/consolidated
+ggp-client preprocess --project ggs  # downloaded data files as parquet in data/preprocessed
+ggp-client consolidate --project ggs # stacked per round and wave in data/consolidated
 ```
 
 `list` takes the same filters as `download`, so use it as a dry run.
 
 To get all GGS data, rounds 1 and 2 with every datafile type (dta, sav, csv), run the script at the root:
-`python download_ggs.py` (or `python download_ggs.py some_dir`). In November 2026 that was 69 files, a 0.5 GB
+`python download_ggs.py` (into `data/raw/downloads`, or `python download_ggs.py some_dir`). In November 2026 that was 69 files, a 0.5 GB
 download and 7.6 GB unpacked, in about 2 minutes. Three GGS-I files (Australia waves 1 and 2, Norway wave 1) give
 "404 Not Found" on the portal itself, so the script reports them and exits with 1.
 
@@ -46,27 +46,28 @@ import asyncio
 from ggp_client import ggpClient
 
 async def main():
-    async with ggpClient(project="ggs", round=2, wave=["w1", "w2"]) as p:  # data_dir defaults to ggp_data
+    async with ggpClient(project="ggs", round=2, wave=["w1", "w2"]) as p:  # data_dir defaults to "data"
         await p.sync()                     # see "Logging in" for the access link
         print(len(p.rows), "files to get")
-        print(await p.download(ext=["dta", "sav"], metadata=False))  # p.rows into ggp_data/downloads
+        print(await p.download(ext=["dta", "sav"], metadata=False))  # p.rows into data/raw/downloads
 
 asyncio.run(main())
 ```
 
 ## What gets stored
 
-Everything lives in `--data-dir` (default `ggp_data/`):
+Everything lives in `--data-dir` (default `data/`):
 
 - `catalogue.sqlite`: table `dataset` (project, round, wave, country, version, collection dates,
   page and Colectica links, target folder and file stem) and table `file` (download id, label, size, URL,
   folder, what was unpacked). Ids are assigned once and never change.
-- `downloads/<series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/`, all lowercase, one folder per downloaded file,
-  for example `downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/`. FFS has no wave level and no folder per dataset:
+- `raw/downloads/<series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/`, all lowercase, one folder per downloaded file,
+  for example `raw/downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/`. FFS has no wave level and no folder per dataset:
   `ffs/at/ffs_at.dat`, see "FFS data". Harmonized Histories and Additional Datasets:
   `hh/harmonized-histories/hh_harmonized-histories_<id>/` (one folder per part), `other/nkps/other_nkps/`.
 - `.session.json`: your login session (mode 600), so the access link is used once, not on every run.
-- `preprocessed/` and `consolidated/`: parquet files, see "Reading, preprocessing and consolidating".
+- `preprocessed/` (parquet and meta.json per data file) and `consolidated/` (parquet per round and wave), see
+  "Reading, preprocessing and consolidating".
 - `ggp_client.log`: every sync and download with a time stamp: logins, each file downloaded (size, files kept,
   folder), skipped or failed (with the reason), and retries. The access link is never logged.
 
@@ -83,14 +84,14 @@ Every Family and Fertility Survey archive holds three files:
 Exceptions: Estonia ships ready-made `.SAV` files instead of a `.SPS`, Greece has no `.TBL` and its `.SPS` has no labels.
 
 FFS has one dataset per country, so it has no folder of its own: the raw files are renamed after the dataset,
-and with `--ext` the data is also converted, with variable and value labels, to `converted_data.<ext>`:
+and the data is also converted, with variable and value labels, to `converted_data.dta` (or to the types `--ext` names).
+Preprocessing reads that dta, so the parquet gets its labels in `meta.json`:
 
 ```
-downloads/ffs/at/ffs_at.dat           ggp-client download --project ffs --country at
-downloads/ffs/at/ffs_at.sps
-downloads/ffs/at/ffs_at.tbl
-downloads/ffs/at/converted_data.sav   ... --ext sav dta
-downloads/ffs/at/converted_data.dta
+raw/downloads/ffs/at/ffs_at.dat           ggp-client download --project ffs --country at
+raw/downloads/ffs/at/ffs_at.sps
+raw/downloads/ffs/at/ffs_at.tbl
+raw/downloads/ffs/at/converted_data.dta   (with --ext sav dta: converted_data.sav as well)
 ```
 
 Estonia has two samples (and a total), so its names get the sample added: `ffs_ee_est_f.dat`,
@@ -110,11 +111,11 @@ A cell that is not a number (the files use `*` for overflow) is read as missing,
 add `SAVE OUTFILE='ffs_at.sav'.` at the end and run all. SPSS reads the columns and applies the labels and
 missing values.
 
-**In R** there is no reader for SPSS syntax, so convert first (`--ext sav` or `dta`) and read the result with haven:
+**In R** there is no reader for SPSS syntax, so use the converted file (`--ext sav` for a `.sav`) and read the result with haven:
 
 ```r
 library(haven)
-ffs <- read_sav("ggp_data/downloads/ffs/at/converted_data.sav", user_na = TRUE)  # keep 98 etc. as labelled missing
+ffs <- read_sav("data/raw/downloads/ffs/at/converted_data.sav", user_na = TRUE)  # keep 98 etc. as labelled missing
 table(as_factor(ffs$RESID))                                                     # value labels as factor levels
 attr(ffs$V917, "label")                                                         # "Religion respondent"
 ```
@@ -123,28 +124,38 @@ attr(ffs$V917, "label")                                                         
 
 **Reading.** `ggp_client.read` reads any downloaded data file into a polars DataFrame: `.parquet`, `.dta`, `.sav`,
 `.csv`, and an FFS `.sps` (with its `.dat`, no conversion needed). Values are the codes (value labels are not
-applied); in `.sav`, values SPSS marks as missing are null. Files with broken text encoding (several GGS-I files,
+applied; `read.meta(path)` gives the labels of a dta or sav file); in `.sav`, values SPSS marks as missing are null. Files with broken text encoding (several GGS-I files,
 GGS-II Finland and Uruguay `.dta`) are read as latin1, which gives the same text as their `.sav` twins.
 
 ```python
 from ggp_client import read
-df = read.read("ggp_data/downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/ggsii_wave1_at_v_1_1/GGSII_Wave1_AT_V_1_1.dta")
+df = read.read("data/raw/downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/ggsii_wave1_at_v_1_1/GGSII_Wave1_AT_V_1_1.dta")
 lf = read.scan("....parquet")              # LazyFrame: parquet and csv are scanned, dta/sav/sps read first
 df = await read.read_async("....sav")      # does not block the event loop
 ```
 
-**Preprocessing** saves every downloaded data file of the selected rows as parquet in `ggp_data/preprocessed`, at
-the same path as in `downloads` (`.../GGSII_Wave1_AT_V_1_1.parquet`). A file that comes as dta, sav and csv is read
-once (preference: parquet, dta, sav, csv, sps). FFS is read from the raw `.sps`/`.dat` (Estonia: its `.sav`), never
-from `converted_data.*`. Columns added: `ggp_project`, `ggp_round`, `ggp_series`, `ggp_wave`, `ggp_country`,
-`ggp_version` and `ggp_file` (the source file under `downloads`).
+**Preprocessing** saves every downloaded data file of the selected rows as parquet in `data/preprocessed`, at
+the same path as in `raw/downloads` (`.../GGSII_Wave1_AT_V_1_1.parquet`), with the labels of a dta or sav file next
+to it in `.../GGSII_Wave1_AT_V_1_1.meta.json`: `column_labels`, `value_labels` (`{"age": {"30": "thirty"}}`),
+`missing_ranges`, `original_types`, `file_label`. A file that comes as dta, sav and csv is read once (preference:
+parquet, dta, sav, csv, sps). FFS is read from `converted_data.dta`; a folder downloaded before FFS was converted by
+default has only the raw files and is read from its `.sps`/`.dat`, without meta.json (download it again with
+`--force` to get the dta). Columns added: `ggp_project`, `ggp_round`, `ggp_series`, `ggp_wave`, `ggp_country`,
+`ggp_version` and `ggp_file` (the source file under `raw/downloads`).
 
-**Consolidating** stacks the preprocessed files per round and wave into `ggp_data/consolidated/<series>_<wave>.parquet`:
+**Consolidating** stacks the preprocessed files per round and wave into `data/consolidated/<series>_<wave>.parquet`:
 `ggs-ii_w1.parquet`, `ggs-i_w2.parquet`, `ffs.parquet` (no waves), `hh_harmonized-histories.parquet`, ...
 Columns are matched by name; a column a country lacks is null there, and a column that is a number in one country
 and text in another becomes text. It holds the countries of the rows you select, so filter by country only if you
 want a smaller file of that name. A dataset shipped as two files is in it twice; tell them apart by `ggp_file`
 (GGS-II Belarus wave 1 comes in English and Russian, `..._RU.dta`).
+
+Country-specific variables are left out of the consolidated files. GGS names them after the GGP country number:
+`<name>_<number><nn>`, for example `aut01a_2101` (Austria is 21), `a837_1401` (Germany's own work schedule
+question, 14), `cweight_1801` (the Dutch weight, 18). The number is looked up in `consolidate.COUNTRY_NUMBERS`
+(the values of the `country` variable in the GGS-II files), or else read from the file's own `country` variable.
+For all GGS that leaves out 2,946 variables of 39 files (GGS-II wave 1 goes from 5,642 to 4,001 columns); the
+per-country files in `preprocessed` keep them, and the log says how many were left out of which file.
 
 Both keep existing files unless `force`. From the client they run concurrently (async); the modules also have plain
 functions:
@@ -155,12 +166,12 @@ async with ggpClient(project="ggs", concurrency=4) as p:
     await p.consolidate()         # all groups in one lazy polars run (collect_all_async)
 
 from ggp_client import consolidate, preprocess   # without asyncio, one at a time
-preprocess.preprocess(p.rows, "ggp_data/downloads", "ggp_data/preprocessed")
-consolidate.consolidate(p.rows, "ggp_data/downloads", "ggp_data/preprocessed", "ggp_data/consolidated")
+preprocess.preprocess(p.rows, "data/raw/downloads", "data/preprocessed")
+consolidate.consolidate(p.rows, "data/raw/downloads", "data/preprocessed", "data/consolidated")
 ```
 
 All GGS (69 files, 0.5 GB download) took 2 minutes to preprocess (133 MB of parquet) and 12 seconds to consolidate
-into 10 files, for example GGS-II wave 1: 185,660 rows of 20 countries, 5,642 columns.
+into 10 files, for example GGS-II wave 1: 185,660 rows of 20 countries, 4,001 columns.
 
 ## Logging
 
@@ -176,7 +187,7 @@ folder, keeping the structure inside the archive. An archive inside the archive 
 for example `ggs2_w1_at_v1.1/data/stata.zip` becomes `ggs2_w1_at_v1.1/data/stata/`. Folder names are lowercased, file names
 are kept as they are in the archive. The archive itself is not kept. Each file is written under a temporary name and renamed when complete.
 
-- `--ext` (default `dta sav csv`): only datafiles of these types are kept. Data files of another type are skipped.
+- `--ext` (default `dta sav csv`; for FFS the conversion, default `dta`): only datafiles of these types are kept. Data files of another type are skipped.
 - `--metadata` (default off): also keep every file that is not a datafile type (codebooks, readmes, xml, ...).
 - Asking for more later (another `--ext`, or `--metadata`) downloads the file again and adds to the folder;
   nothing is deleted. The same or a smaller request is skipped. A file that already exists is never overwritten,

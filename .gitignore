@@ -224,6 +224,7 @@ __marimo__/
 
 # ggp_client: local catalogue, downloads and the login session (a secret)
 ggp_data/
+/data/
 /*_data/
 .session.json
 .session.tmp

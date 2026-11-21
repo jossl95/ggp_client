@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download all GGS data, rounds 1 and 2 (latest versions), keeping every datafile type: dta, sav and csv.
 
-    python download_ggs.py              # into ggp_data/
+    python download_ggs.py              # into data/raw/downloads
     python download_ggs.py other_dir    # elsewhere
 
 Refreshes the catalogue first (asks for the emailed access link if there is no valid session; see README,
@@ -17,7 +17,7 @@ from ggp_client import ggpClient
 EXT = ["dta", "sav", "csv"]
 
 
-async def main(data_dir="ggp_data", **client_options):
+async def main(data_dir="data", **client_options):
     async with ggpClient(data_dir, project="ggs", **client_options) as p:  # project GGS is rounds 1 and 2
         await p.sync()
         await p.login()

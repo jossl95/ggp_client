@@ -53,7 +53,7 @@ def show(rows):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ggp-client", description="Index and download GGP datasets.")
-    ap.add_argument("--data-dir", default="ggp_data", help="catalogue, downloads and session live here")
+    ap.add_argument("--data-dir", default="data", help="catalogue, session and log; downloads in raw/downloads, parquet in preprocessed and consolidated")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sync", help="index all datasets (Harmonized Histories and Additional Datasets need a login)")
@@ -67,7 +67,7 @@ def main(argv=None):
     add_access_url(d)
     d.add_argument("--concurrency", type=positive, default=3)
     d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three); "
-                                                         "FFS data is converted to these only when given")
+                                                         "FFS data is converted to these (default: dta)")
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
     d.add_argument("--force", action="store_true", help="download and overwrite even files that already exist")
 

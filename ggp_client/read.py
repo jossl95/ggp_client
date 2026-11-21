@@ -3,6 +3,7 @@
     df = read("GGSII_Wave1_AT_V_1_1.dta")          # polars DataFrame
     lf = scan("GGSII_Wave1_AT_V_1_1.parquet")      # polars LazyFrame
     df = await read_async("GGSII_Wave1_AT_V_1_1.sav")
+    m = meta("GGSII_Wave1_AT_V_1_1.dta")           # variable and value labels (dta and sav)
 
 Values are the codes; value labels are not applied. In .sav, values SPSS marks as missing are null.
 """
@@ -16,6 +17,7 @@ from . import ffs_conversion
 
 FORMATS = (".parquet", ".dta", ".sav", ".csv", ".sps")  # also the preference when one file comes in several
 LAZY = (".parquet", ".csv")  # polars scans these itself; the others are read whole, then made lazy
+LABELLED = (".dta", ".sav")  # the types that carry variable and value labels
 
 
 def _dat(sps):
@@ -25,6 +27,14 @@ def _dat(sps):
     if same or len(dats) == 1:
         return (same or dats)[0]
     raise ValueError(f"no .dat for {sps}")
+
+
+def _readstat(p, **kw):
+    f = pyreadstat.read_dta if p.suffix.lower() == ".dta" else pyreadstat.read_sav
+    try:
+        return f(p, **kw)
+    except (pyreadstat.ReadstatError, UnicodeDecodeError):  # some GGS files mix encodings: read as their .sav twins
+        return f(p, encoding="latin1", **kw)
 
 
 def scan(path):
@@ -44,12 +54,8 @@ def read(path):
     s = p.suffix.lower()
     if s in LAZY:
         return scan(p).collect()
-    if s in (".dta", ".sav"):
-        f = pyreadstat.read_dta if s == ".dta" else pyreadstat.read_sav
-        try:
-            return f(p, output_format="polars")[0]
-        except (pyreadstat.ReadstatError, UnicodeDecodeError):  # some GGS files mix encodings: read as their .sav twins
-            return f(p, output_format="polars", encoding="latin1")[0]
+    if s in LABELLED:
+        return _readstat(p, output_format="polars")[0]
     if s == ".sps":
         return pl.from_pandas(ffs_conversion.read_ffs(p, _dat(p))[0])
     raise ValueError(f"{p.name}: cannot read {s or 'files without a type'}; choose from {', '.join(FORMATS)}")
@@ -60,3 +66,19 @@ async def read_async(path):
     if Path(path).suffix.lower() in LAZY:
         return await scan(path).collect_async()
     return await asyncio.to_thread(read, path)
+
+
+def meta(path):
+    """The labels of a dta or sav file as a JSON-ready dict (None for other types).
+
+    column_labels {variable: label}, value_labels {variable: {code: label}}, missing_ranges (sav: user-defined
+    missing values), original_types (Stata/SPSS formats) and file_label.
+    """
+    p = Path(path)
+    if p.suffix.lower() not in LABELLED:
+        return None
+    m = _readstat(p, metadataonly=True)[1]
+    code = lambda k: str(int(k)) if isinstance(k, float) and k.is_integer() else str(k)  # JSON keys are text: 1.0 -> "1"
+    return dict(file_label=m.file_label, column_labels=m.column_names_to_labels,
+                value_labels={c: {code(k): v for k, v in d.items()} for c, d in m.variable_value_labels.items()},
+                missing_ranges=m.missing_ranges, original_types=m.original_variable_types)
