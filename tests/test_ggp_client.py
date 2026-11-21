@@ -11,7 +11,7 @@ import httpx
 import py7zr
 import pytest
 
-from ggp_client import db, extract, parse
+from ggp_client import consolidate, db, extract, parse, preprocess, read
 from ggp_client.client import LoginError, ggpClient
 
 CATALOG = """<h2>GGS-II</h2>
@@ -513,3 +513,34 @@ def test_download_ggs_script(tmp_path, capsys):
     assert "downloaded 1, skipped 0 already present, failed 1" in out and "failed: ggs2-nl-wave1" in out
     assert tree(tmp_path / "downloads") == [  # GGS only (no FFS, HH, other), every datafile type kept
         "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.dta", "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.sav"]
+
+
+def test_read_preprocess_and_consolidate(tmp_path):
+    import pandas as pd
+    import polars as pl
+    import pyreadstat
+    root, pre, out = tmp_path / "downloads", tmp_path / "preprocessed", tmp_path / "consolidated"
+    at, nl = root / "ggs-ii/w1/at/ggs2_w1_at_v1.1/[raw data]", root / "ggs-ii/w1/nl/ggs2_w1_nl_v1.0"
+    at.mkdir(parents=True), nl.mkdir(parents=True)
+    pyreadstat.write_dta(pd.DataFrame({"id": [1, 2], "age": [30, 40]}), at / "AT.dta")
+    pyreadstat.write_sav(pd.DataFrame({"id": [9], "age": [99]}), at / "AT.sav")  # the same file: dta is read
+    pl.DataFrame({"id": [3], "age": ["n/a"], "x": [1.5]}).write_csv(nl / "NL.csv")  # age as text: becomes text
+    (nl / "converted_data.csv").write_text("id\n9\n")  # a derived FFS copy is never read
+    rows = [dict(project="GGS", round=2, series="GGS-II", wave="w1", country=cc, version="1",
+                 local_path=str(d.relative_to(root).parent if cc == "AT" else d.relative_to(root)))
+            for cc, d in [("AT", at), ("NL", nl)]] + [dict(local_path=None)]  # not downloaded: ignored
+    assert [p.name for p in preprocess.datafiles(at)] == ["AT.dta"] and read.read(at / "AT.sav")["age"][0] == 99
+
+    assert preprocess.preprocess(rows[:1], root, pre) == (1, 0, [])
+    assert asyncio.run(preprocess.preprocess_async(rows, root, pre)) == (1, 1, [])  # AT is already there
+    df = read.read(next(pre.rglob("AT.parquet")))
+    assert df["age"].to_list() == [30, 40] and df["ggp_country"].unique().to_list() == ["AT"]
+    assert df["ggp_file"][0] == "ggs-ii/w1/at/ggs2_w1_at_v1.1/[raw data]/AT.dta" and df["ggp_round"][0] == 2
+
+    assert asyncio.run(consolidate.consolidate_async(rows, root, pre, out)) == (1, 0, [])
+    w1 = pl.read_parquet(out / "ggs-ii_w1.parquet")
+    assert sorted(w1["age"].to_list()) == ["30.0", "40.0", "n/a"] and w1["x"].null_count() == 2
+    assert consolidate.consolidate(rows, root, pre, out) == (0, 1, [])  # kept
+    assert consolidate.consolidate(rows[1:], root, pre, out, force=True) == (1, 0, [])  # only the rows given
+    assert pl.read_parquet(out / "ggs-ii_w1.parquet")["ggp_country"].to_list() == ["NL"]
+    assert not list(tmp_path.rglob("*.part.parquet"))

@@ -71,6 +71,13 @@ def main(argv=None):
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
     d.add_argument("--force", action="store_true", help="download and overwrite even files that already exist")
 
+    for cmd, text in [("preprocess", "save downloaded data files as parquet in <data-dir>/preprocessed"),
+                      ("consolidate", "stack preprocessed files per round and wave in <data-dir>/consolidated")]:
+        c = sub.add_parser(cmd, help=text)
+        add_filters(c)
+        c.add_argument("--concurrency", type=positive, default=4)
+        c.add_argument("--force", action="store_true", help="redo and overwrite files that already exist")
+
     a = ap.parse_args(argv)
     data = Path(a.data_dir)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -99,6 +106,19 @@ def main(argv=None):
             show(db.select(db.connect(data / "catalogue.sqlite"), **filters(a)))
         except ValueError as e:
             sys.exit(str(e))
+        return
+
+    if a.cmd in ("preprocess", "consolidate"):
+        async def work():
+            async with ggpClient(data, concurrency=a.concurrency, force=a.force, **filters(a)) as p:
+                return await getattr(p, a.cmd)()
+        try:
+            done, skipped, failed = asyncio.run(work())
+        except ValueError as e:
+            sys.exit(str(e))
+        print(f"{a.cmd}: {done} written, {skipped} skipped already present, failed {len(failed)}")
+        for name, err in failed:
+            print(f"failed: {name}: {err}")
         return
 
     async def run():

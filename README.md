@@ -15,6 +15,9 @@ ggp-client download --project ggs --round 2 --wave w1 --country nl
 ggp-client download --ext dta        # only Stata files (dta, sav, csv; one or several)
 ggp-client download --metadata       # also keep documentation and other non-data files
 ggp-client download --ids 3-12,20 --all-versions
+
+ggp-client preprocess --project ggs  # downloaded data files as parquet in ggp_data/preprocessed
+ggp-client consolidate --project ggs # stacked per round and wave in ggp_data/consolidated
 ```
 
 `list` takes the same filters as `download`, so use it as a dry run.
@@ -63,6 +66,7 @@ Everything lives in `--data-dir` (default `ggp_data/`):
   `ffs/at/ffs_at.dat`, see "FFS data". Harmonized Histories and Additional Datasets:
   `hh/harmonized-histories/hh_harmonized-histories_<id>/` (one folder per part), `other/nkps/other_nkps/`.
 - `.session.json`: your login session (mode 600), so the access link is used once, not on every run.
+- `preprocessed/` and `consolidated/`: parquet files, see "Reading, preprocessing and consolidating".
 - `ggp_client.log`: every sync and download with a time stamp: logins, each file downloaded (size, files kept,
   folder), skipped or failed (with the reason), and retries. The access link is never logged.
 
@@ -114,6 +118,49 @@ ffs <- read_sav("ggp_data/downloads/ffs/at/converted_data.sav", user_na = TRUE) 
 table(as_factor(ffs$RESID))                                                     # value labels as factor levels
 attr(ffs$V917, "label")                                                         # "Religion respondent"
 ```
+
+## Reading, preprocessing and consolidating (polars)
+
+**Reading.** `ggp_client.read` reads any downloaded data file into a polars DataFrame: `.parquet`, `.dta`, `.sav`,
+`.csv`, and an FFS `.sps` (with its `.dat`, no conversion needed). Values are the codes (value labels are not
+applied); in `.sav`, values SPSS marks as missing are null. Files with broken text encoding (several GGS-I files,
+GGS-II Finland and Uruguay `.dta`) are read as latin1, which gives the same text as their `.sav` twins.
+
+```python
+from ggp_client import read
+df = read.read("ggp_data/downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/ggsii_wave1_at_v_1_1/GGSII_Wave1_AT_V_1_1.dta")
+lf = read.scan("....parquet")              # LazyFrame: parquet and csv are scanned, dta/sav/sps read first
+df = await read.read_async("....sav")      # does not block the event loop
+```
+
+**Preprocessing** saves every downloaded data file of the selected rows as parquet in `ggp_data/preprocessed`, at
+the same path as in `downloads` (`.../GGSII_Wave1_AT_V_1_1.parquet`). A file that comes as dta, sav and csv is read
+once (preference: parquet, dta, sav, csv, sps). FFS is read from the raw `.sps`/`.dat` (Estonia: its `.sav`), never
+from `converted_data.*`. Columns added: `ggp_project`, `ggp_round`, `ggp_series`, `ggp_wave`, `ggp_country`,
+`ggp_version` and `ggp_file` (the source file under `downloads`).
+
+**Consolidating** stacks the preprocessed files per round and wave into `ggp_data/consolidated/<series>_<wave>.parquet`:
+`ggs-ii_w1.parquet`, `ggs-i_w2.parquet`, `ffs.parquet` (no waves), `hh_harmonized-histories.parquet`, ...
+Columns are matched by name; a column a country lacks is null there, and a column that is a number in one country
+and text in another becomes text. It holds the countries of the rows you select, so filter by country only if you
+want a smaller file of that name. A dataset shipped as two files is in it twice; tell them apart by `ggp_file`
+(GGS-II Belarus wave 1 comes in English and Russian, `..._RU.dta`).
+
+Both keep existing files unless `force`. From the client they run concurrently (async); the modules also have plain
+functions:
+
+```python
+async with ggpClient(project="ggs", concurrency=4) as p:
+    await p.preprocess()          # 4 files at a time; dta/sav in threads, polars writes lazily (sink_parquet)
+    await p.consolidate()         # all groups in one lazy polars run (collect_all_async)
+
+from ggp_client import consolidate, preprocess   # without asyncio, one at a time
+preprocess.preprocess(p.rows, "ggp_data/downloads", "ggp_data/preprocessed")
+consolidate.consolidate(p.rows, "ggp_data/downloads", "ggp_data/preprocessed", "ggp_data/consolidated")
+```
+
+All GGS (69 files, 0.5 GB download) took 2 minutes to preprocess (133 MB of parquet) and 12 seconds to consolidate
+into 10 files, for example GGS-II wave 1: 185,660 rows of 20 countries, 5,642 columns.
 
 ## Logging
 

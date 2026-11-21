@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from . import db, extract, ffs_conversion, parse
+from . import consolidate, db, extract, ffs_conversion, parse, preprocess
 
 logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print request URLs: the access link is one
 log = logging.getLogger("ggp_client")  # never log access_url: it works as a password
@@ -230,6 +230,18 @@ class ggpClient:
         log.info("download: %d done, %d skipped, %d failed", done, skipped, len(failed))
         self.rows = self.select()  # local_path and fetched changed
         return done, skipped, failed
+
+    async def preprocess(self, rows=None):
+        """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/preprocessed,
+        `concurrency` at a time (see the preprocess module). Returns (done, skipped, [(file, error)])."""
+        return await preprocess.preprocess_async(self.rows if rows is None else rows, self.dir / "downloads",
+                                                 self.dir / "preprocessed", self.force, self.concurrency)
+
+    async def consolidate(self, rows=None):
+        """Stack the preprocessed files of rows (default: self.rows) per series and wave into
+        data_dir/consolidated/<series>_<wave>.parquet (see the consolidate module). Returns (done, skipped, [(name, error)])."""
+        return await consolidate.consolidate_async(self.rows if rows is None else rows, self.dir / "downloads",
+                                                   self.dir / "preprocessed", self.dir / "consolidated", self.force)
 
     async def _fetch(self, r, root, want, metadata, convert=()):
         stem = r["stem"] + (f"_{r['download_id']}" if r["n_files"] > 1 else "")
