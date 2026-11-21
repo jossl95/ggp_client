@@ -240,7 +240,7 @@ class ggpClient:
 
     async def preprocess(self, rows=None):
         """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/download/processed,
-        `concurrency` at a time (see the preprocess module). Returns (done, skipped, [(file, error)])."""
+        `concurrency` at a time (see processing.preprocess). Returns (done, skipped, [(file, error)])."""
         return await processing.preprocess_async(self.rows if rows is None else rows, self.downloads,
                                                  self.processed, self.force, self.concurrency)
 

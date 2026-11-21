@@ -114,7 +114,7 @@ download/processed/ffs/at/converted_data.meta.json
 
 Estonia has two samples (and a total), so its names get the sample added: `ffs_ee_est_f.dat`,
 `converted_data_est_f.sav`, ...
-From Python: `await p.download(ext=["sav"])`. A single dataset: `python -m ggp_client.processing AUSTRIA.SPS --ext dta`.
+From Python: `await p.download(ext=["sav"])`. A single dataset: `ggp-client convert AUSTRIA.SPS --ext dta`.
 
 Conversion replaces every `$` in every variable name with `_` (Stata does not allow `$`), in all three formats:
 `IND01$01` is `IND01_01`, `V004$12` is `V004_12`. Other names are unchanged. The raw `.sps` and `.tbl` are rewritten the

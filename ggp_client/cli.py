@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from . import db, parse
+from . import db, parse, processing, read
 from .client import LoginError, ggpClient
 
 
@@ -78,9 +78,26 @@ def main(argv=None):
         c.add_argument("--concurrency", type=positive, default=4)
         c.add_argument("--force", action="store_true", help="redo and overwrite files that already exist")
 
+    c = sub.add_parser("convert", help="convert one FFS dataset (.SPS and its .DAT) to sav, dta or csv, with labels")
+    c.add_argument("sps", help="the .SPS file; the .DAT of the same name (or the only .DAT next to it) is read")
+    c.add_argument("--ext", nargs="+", default=["sav"], choices=processing.FORMATS)
+    c.add_argument("--force", action="store_true", help="overwrite existing files")
+
     a = ap.parse_args(argv)
     data = Path(a.data_dir)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+
+    if a.cmd == "convert":  # one dataset, outside the catalogue: written next to the .SPS
+        sps = Path(a.sps)
+        try:
+            df, meta = processing.read_ffs(sps, read._dat(sps))
+        except (OSError, ValueError) as e:
+            sys.exit(f"convert failed: {e}")
+        for e in a.ext:
+            t = sps.with_suffix("." + e)
+            print(f"{t}: {'written' if processing.write(df, meta, t, a.force) else 'exists, kept (use --force)'}, "
+                  f"{len(df)} cases, {len(df.columns)} variables")
+        return
 
     if a.cmd == "sync":
         async def run():

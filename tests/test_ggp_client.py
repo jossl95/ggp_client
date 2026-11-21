@@ -478,6 +478,12 @@ def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() == "mine"
     processing.convert(tmp_path, ["csv"], "ffs_us_v1.0", force=True)
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() != "mine"
+    from ggp_client import cli
+    cli.main(["convert", str(tmp_path / "USA2.SPS"), "--ext", "dta"])  # one dataset, from the command line
+    assert pyreadstat.read_dta(tmp_path / "USA2.dta")[1].column_names_to_labels["COUNTRY"] == "ISO country code"
+    (tmp_path / "nodat").mkdir()
+    with pytest.raises(SystemExit, match="no .dat"):  # a clear message, not a traceback
+        cli.main(["convert", str(tmp_path / "nodat" / "X.SPS")])
 
 
 def test_ffs_unpack_names_like_estonia(tmp_path):

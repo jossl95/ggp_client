@@ -4,7 +4,7 @@ FFS conversion. Each FFS archive holds COUNTRY.DAT (the data, `records` lines pe
 syntax: DATA LIST with the record and columns of every variable, VARIABLE LABELS, VALUE LABELS, MISSING VALUE) and
 COUNTRY.TBL (the published frequency tables, to check results against; not needed to read the data).
 
-    python -m ggp_client.processing AUSTRIA.SPS --ext sav dta     # writes AUSTRIA.sav and AUSTRIA.dta
+    ggp-client convert AUSTRIA.SPS --ext sav dta     # writes AUSTRIA.sav and AUSTRIA.dta
 
 Every $ in a variable name becomes _ (Stata does not allow $): IND01$01 becomes IND01_01. Downloads also
 rewrite the raw .sps that way (see rewrite_sps), so syntax, converted files and documentation use the same names.
@@ -22,7 +22,6 @@ a country without one is read from the raw .sps/.dat.
 Added columns: ggp_project, ggp_round, ggp_series, ggp_wave, ggp_country, ggp_version, ggp_file.
 An existing parquet (and meta.json) is kept unless force.
 """
-import argparse
 import asyncio
 import collections
 import json
@@ -432,25 +431,3 @@ async def preprocess_async(rows, root, out, force=False, concurrency=4):
     with read.pool(concurrency) as ex:  # also bounds memory: dta and sav are read whole
         await asyncio.gather(*(one(*j) for j in todo))
     return len(todo) - len(failed), skipped, failed
-
-
-def main(argv=None):
-    ap = argparse.ArgumentParser(prog="python -m ggp_client.processing",
-                                 description="Convert an FFS dataset (.SPS and its .DAT) to sav, dta or csv, with labels.")
-    ap.add_argument("sps", help="the .SPS file; the .DAT of the same name is read")
-    ap.add_argument("--dat", help="the .DAT file, if its name differs")
-    ap.add_argument("--ext", nargs="+", default=["sav"], choices=FORMATS)
-    ap.add_argument("--force", action="store_true", help="overwrite existing files")
-    a = ap.parse_args(argv)
-    sps = Path(a.sps)
-    dat = Path(a.dat) if a.dat else next(p for p in sps.parent.iterdir()
-                                         if p.suffix.lower() == ".dat" and p.stem.lower() == sps.stem.lower())
-    df, meta = read_ffs(sps, dat)
-    for e in a.ext:
-        t = sps.with_suffix("." + e)
-        print(f"{t}: {'written' if write(df, meta, t, a.force) else 'exists, kept (use --force)'}, "
-              f"{len(df)} cases, {len(df.columns)} variables")
-
-
-if __name__ == "__main__":
-    main()
