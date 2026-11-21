@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -18,19 +19,42 @@ class LoginError(RuntimeError):
     pass
 
 
+@dataclass
 class ggpClient:
-    def __init__(self, data_dir, access_url=None, concurrency=8, transport=None):
-        self.dir = Path(data_dir)
+    """The catalogue (self.con), the rows your filters select (self.rows), and the portal session.
+
+    project, round, wave, country, ids and all_versions are the filters of db.select;
+    None means all. self.rows is refreshed after sync and download.
+    """
+    data_dir: str | Path = "ggp_data"
+    access_url: str | None = field(default=None, repr=False)  # secret: never logged, stored or put in errors
+    concurrency: int = 8
+    project: object = None
+    round: object = None
+    wave: object = None
+    country: object = None
+    ids: list | None = None
+    all_versions: bool = False
+    transport: object = field(default=None, repr=False)
+
+    def __post_init__(self):
+        self.dir = Path(self.data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
-        # secret: never logged, stored or put in error messages
-        self.access_url = access_url or os.environ.get("GGP_ACCESS_URL")
-        if concurrency < 1:
+        self.access_url = self.access_url or os.environ.get("GGP_ACCESS_URL")
+        if self.concurrency < 1:
             raise ValueError("concurrency must be 1 or more")  # 0 would wait forever
-        self.sem = asyncio.Semaphore(concurrency)
+        self.con = db.connect(self.dir / "catalogue.sqlite")
+        self.rows = self.select()  # raises ValueError for a filter value that is not in the catalogue
+        self.sem = asyncio.Semaphore(self.concurrency)
         self.client = httpx.AsyncClient(
             base_url=parse.BASE, follow_redirects=True, timeout=60,
-            transport=transport, headers={"User-Agent": "ggp-client/0.1"},
+            transport=self.transport, headers={"User-Agent": "ggp-client/0.1"},
         )
+
+    def select(self):
+        """The downloadable rows that match this client's filters."""
+        return db.select(self.con, self.project, self.round, self.wave, self.country, self.ids,
+                         self.all_versions, downloadable=True)
 
     async def __aenter__(self):
         return self
@@ -52,7 +76,7 @@ class ggpClient:
                 await asyncio.sleep(2 ** attempt)
         raise RuntimeError(f"giving up on {url}")
 
-    async def sync(self, con, dump=None):
+    async def sync(self, dump=None):
         """Index the catalogue. Returns (found, failed) by slug.
 
         The public pages need no login. Harmonized Histories and Additional Datasets are listed only
@@ -90,8 +114,9 @@ class ggpClient:
             if base != slug and base in found and found[base]["version"] == parse.parse_slug(slug)["version"]:
                 del found[slug]
         for slug in sorted(found, key=parse.sort_key):  # a fresh db numbers datasets in this order
-            db.upsert(con, slug, found[slug])
-        con.commit()
+            db.upsert(self.con, slug, found[slug])
+        self.con.commit()
+        self.rows = self.select()
         return found, failed
 
     async def _logged_in(self):
@@ -138,8 +163,8 @@ class ggpClient:
             json.dump(cookies, f)
         os.replace(tmp, jar)
 
-    async def download(self, con, rows, root, force=False, ext=None, metadata=False):
-        """Download the files of `rows` and unpack them under root.
+    async def download(self, rows=None, root=None, force=False, ext=None, metadata=False):
+        """Download the files of `rows` (default: self.rows) and unpack them under root (default: data_dir/downloads).
 
         ext: datafile type(s) to keep (dta, sav, csv): one value, a list, or None for all three.
         metadata: also keep the non-data files (documentation, codebooks) from the archives.
@@ -147,7 +172,8 @@ class ggpClient:
         (another ext, or metadata) downloads it again and adds to the folder.
         Returns (done, skipped, [(slug, error)]).
         """
-        root = Path(root)
+        rows = self.rows if rows is None else rows
+        root = Path(root or self.dir / "downloads")
         want = extract.norm_ext(ext)
         kept = want | ({"meta"} if metadata else set())
         done = skipped = 0
@@ -164,10 +190,11 @@ class ggpClient:
             except Exception as e:  # one bad file must not stop the batch
                 failed.append((r["slug"], str(e) or type(e).__name__))
                 return
-            db.mark_downloaded(con, r["download_id"], rel, kept)
+            db.mark_downloaded(self.con, r["download_id"], rel, kept)
             done += 1
 
         await asyncio.gather(*(one(r) for r in rows))
+        self.rows = self.select()  # local_path and fetched changed
         return done, skipped, failed
 
     async def _fetch(self, r, root, want, metadata):

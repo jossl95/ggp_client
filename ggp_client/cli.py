@@ -30,12 +30,13 @@ def add_filters(ap):
     ap.add_argument("--all-versions", action="store_true", help="include superseded versions")
 
 
-def pick(a, con, **extra):
+def filters(a):
     try:
         ids = db.parse_ids(a.ids) if a.ids else None
-        return db.select(con, a.project, a.round, a.wave, a.country, ids, a.all_versions, **extra)
     except ValueError as e:
         sys.exit(str(e))
+    return dict(project=a.project, round=a.round, wave=a.wave, country=a.country, ids=ids,
+                all_versions=a.all_versions)
 
 
 def show(rows):
@@ -51,7 +52,7 @@ def show(rows):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ggp-client", description="Index and download GGP datasets.")
-    ap.add_argument("--data-dir", default="ggp_files", help="catalogue, downloads and session live here")
+    ap.add_argument("--data-dir", default="ggp_data", help="catalogue, downloads and session live here")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sync", help="index all datasets (Harmonized Histories and Additional Datasets need a login)")
@@ -70,13 +71,11 @@ def main(argv=None):
 
     a = ap.parse_args(argv)
     data = Path(a.data_dir)
-    data.mkdir(parents=True, exist_ok=True)
-    con = db.connect(data / "catalogue.sqlite")
 
     if a.cmd == "sync":
         async def run():
             async with ggpClient(data, a.access_url) as p:
-                return await p.sync(con, a.dump)
+                return await p.sync(a.dump)
         try:
             found, failed = asyncio.run(run())
         except (RuntimeError, httpx.HTTPError) as e:  # the catalogue page itself could not be fetched
@@ -92,19 +91,23 @@ def main(argv=None):
         return
 
     if a.cmd == "list":
-        show(pick(a, con))
+        data.mkdir(parents=True, exist_ok=True)
+        try:
+            show(db.select(db.connect(data / "catalogue.sqlite"), **filters(a)))
+        except ValueError as e:
+            sys.exit(str(e))
         return
 
-    rows = pick(a, con, downloadable=True)
-    if not rows:
-        sys.exit("nothing to download (run 'ggp-client sync' first, or loosen the filters)")
-
     async def run():
-        async with ggpClient(data, a.access_url, a.concurrency) as p:
+        async with ggpClient(data, a.access_url, a.concurrency, **filters(a)) as p:
+            if not p.rows:
+                sys.exit("nothing to download (run 'ggp-client sync' first, or loosen the filters)")
             await p.login()
-            return await p.download(con, rows, data / "downloads", a.force, a.ext, a.metadata)
+            return await p.download(force=a.force, ext=a.ext, metadata=a.metadata)
     try:
         done, skipped, failed = asyncio.run(run())
+    except ValueError as e:  # a filter value that is not in the catalogue
+        sys.exit(str(e))
     except LoginError as e:
         sys.exit(f"login failed: {e}")
     print(f"downloaded {done}, skipped {skipped} already present, failed {len(failed)}")

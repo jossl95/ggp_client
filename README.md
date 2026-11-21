@@ -27,26 +27,25 @@ They are the folder names: project `ggs`, `ffs`, `hh` (Harmonized Histories), `o
 country `nl`, `at`, ... For `hh` and `other` the dataset name takes the place of the wave
 (`--project other --wave nkps`) and there is no country. Case does not matter. A value that is not in the catalogue is an error, not an empty result.
 
-From Python the same filters are arguments of `db.select`, and `ext` and `metadata` go to `ggpClient.download`:
+From Python the filters are arguments of `ggpClient`. It opens the catalogue as `self.con` and keeps the
+matching downloadable rows in `self.rows`, refreshed after `sync()` and `download()`:
 
 ```python
 import asyncio
-from ggp_client import db, ggpClient
-
-con = db.connect("ggp_files/catalogue.sqlite")
-rows = db.select(con, project="ggs", round=2, wave=["w1", "w2"], country=None, downloadable=True)
+from ggp_client import ggpClient
 
 async def main():
-    async with ggpClient("ggp_files") as p:   # see "Logging in" for the access link
-        await p.login()
-        print(await p.download(con, rows, "ggp_files/downloads", ext=["dta", "sav"], metadata=False))
+    async with ggpClient(project="ggs", round=2, wave=["w1", "w2"]) as p:  # data_dir defaults to ggp_data
+        await p.sync()                     # see "Logging in" for the access link
+        print(len(p.rows), "files to get")
+        print(await p.download(ext=["dta", "sav"], metadata=False))  # p.rows into ggp_data/downloads
 
 asyncio.run(main())
 ```
 
 ## What gets stored
 
-Everything lives in `--data-dir` (default `ggp_files/`):
+Everything lives in `--data-dir` (default `ggp_data/`):
 
 - `catalogue.sqlite`: table `dataset` (project, round, wave, country, version, collection dates,
   page and Colectica links, target folder and file stem) and table `file` (download id, label, size, URL,

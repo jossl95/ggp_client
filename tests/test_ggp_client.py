@@ -179,14 +179,14 @@ def test_plain_file_is_kept_only_if_it_matches(tmp_path):
 
 
 def test_sync_download_select(tmp_path):
-    con = db.connect(tmp_path / "c.sqlite")
+    con = db.connect(tmp_path / "catalogue.sqlite")
 
     async def first():
         async with portal(tmp_path, TOKEN) as p:
-            found, failed = await p.sync(con)
+            found, failed = await p.sync()
             await p.login()
             rows = db.select(con, downloadable=True)
-            return found, failed, rows, await p.download(con, rows, tmp_path / "dl")
+            return found, failed, rows, await p.download(rows, tmp_path / "dl")
 
     found, failed, rows, (done, skipped, bad) = asyncio.run(first())
     assert len(found) == 7 and not failed  # v1.0 via "other versions" (v1.1 is the latest: one row), HH, NKPS via the access page
@@ -233,7 +233,7 @@ def test_sync_download_select(tmp_path):
         async def go():
             async with portal(tmp_path) as p:
                 await p.login()
-                res = await p.download(con, db.select(con, downloadable=True), tmp_path / "dl", **kw)
+                res = await p.download(root=tmp_path / "dl", **kw)
                 return res[:2]
         return asyncio.run(go())
 
@@ -250,13 +250,13 @@ def test_sync_download_select(tmp_path):
 
 
 def test_ext_without_matches_fails_and_leaves_no_folder(tmp_path):
-    con = db.connect(tmp_path / "c.sqlite")
+    con = db.connect(tmp_path / "catalogue.sqlite")
 
     async def go():
         async with portal(tmp_path, TOKEN) as p:
-            await p.sync(con)
+            await p.sync()
             await p.login()
-            return await p.download(con, db.select(con, country="at", downloadable=True), tmp_path / "dl", ext="csv")
+            return await p.download(db.select(con, country="at", downloadable=True), tmp_path / "dl", ext="csv")
 
     done, _, bad = asyncio.run(go())
     assert done == 0 and "looked for csv" in bad[0][1]
@@ -344,12 +344,23 @@ def test_access_page_sections():
 def test_sync_without_login_still_indexes_the_public_pages(tmp_path, monkeypatch):
     monkeypatch.setattr("getpass.getpass", no_terminal)
     monkeypatch.delenv("GGP_ACCESS_URL", raising=False)
-    con = db.connect(tmp_path / "c.sqlite")
+    con = db.connect(tmp_path / "catalogue.sqlite")
 
     async def go():
         async with portal(tmp_path) as p:
-            return await p.sync(con)
+            return await p.sync()
 
     found, failed = asyncio.run(go())
     assert len(found) == 5 and list(failed) == ["data access page"]
     assert "skipped" in failed["data access page"]
+
+
+def test_client_holds_con_and_filtered_rows(tmp_path):
+    async def go():
+        async with ggpClient(tmp_path, TOKEN, project="ggs", round=2, wave=["w1"], country=["at", "nl"],
+                             transport=httpx.MockTransport(handler)) as p:
+            assert p.rows == [] and p.con is not None  # empty catalogue until the first sync
+            await p.sync()
+            return [r["slug"] for r in p.rows]
+    assert asyncio.run(go()) == ["ggs2-at-wave1", "ggs2-nl-wave1"]  # refreshed by sync, filters applied
+    assert ggpClient.__dataclass_fields__["data_dir"].default == "ggp_data"
