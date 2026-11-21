@@ -82,8 +82,11 @@ async def read_all_async(paths, concurrency=4):
 
 
 async def read_async(path):
-    """read(), without blocking the event loop."""
-    return (await read_all_async([path], 1))[0]
+    """read() in a thread: for one file a worker process costs more to start than it saves (use read_all_async
+    for several). pyreadstat holds the GIL, so other tasks may pause while a dta/sav is read."""
+    if Path(path).suffix.lower() in LAZY:
+        return await scan(path).collect_async()
+    return await asyncio.to_thread(read, path)
 
 
 def meta(path):

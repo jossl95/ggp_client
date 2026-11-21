@@ -116,7 +116,7 @@ def main(argv=None):
             done, skipped, failed = asyncio.run(work())
         except ValueError as e:
             sys.exit(str(e))
-        print(f"{a.cmd}: {done} written, {skipped} skipped already present, failed {len(failed)}")
+        print(f"{a.cmd}: {done} written, {skipped} skipped (up to date), failed {len(failed)}")
         for name, err in failed:
             print(f"failed: {name}: {err}")
         return

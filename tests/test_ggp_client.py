@@ -561,7 +561,18 @@ def test_read_preprocess_and_consolidate(tmp_path):
     assert sorted(w1["age"].to_list()) == ["30.0", "40.0", "n/a"] and w1["x"].null_count() == 2
     assert "aut01_2101" not in w1.columns and "dem07_1801" not in w1.columns  # country-specific: left out
     assert w1.filter(pl.col("ggp_country") == "NL")["att12_2101"].to_list() == [7]  # Austria's number, not NL's
-    assert consolidate.consolidate(rows, root, pre, out) == (0, 1, [])  # kept
-    assert consolidate.consolidate(rows[1:], root, pre, out, force=True) == (1, 0, [])  # only the rows given
+    assert consolidate.consolidate(rows, root, pre, out) == (0, 1, [])  # up to date: kept
+    assert consolidate.consolidate(rows[1:], root, pre, out) == (1, 0, [])  # other files: made again
     assert pl.read_parquet(out / "ggs-ii_w1.parquet")["ggp_country"].to_list() == ["NL"]
+    assert consolidate.consolidate(rows, root, pre, out) == (1, 0, [])  # AT back in, not "already present"
+    assert sorted(pl.read_parquet(out / "ggs-ii_w1.parquet")["ggp_country"].unique()) == ["AT", "NL"]
+    old = next(pre.rglob("NL.parquet")).stat().st_mtime - 10
+    os.utime(out / "ggs-ii_w1.parquet", (old, old))  # as if NL was preprocessed again after it
+    assert consolidate.consolidate(rows, root, pre, out) == (1, 0, [])  # an input newer than the result
+    assert consolidate.consolidate(rows, root, pre, out) == (0, 1, [])
+    # a country not in COUNTRY_NUMBERS: its number from its own `country` variable, if the file has one country
+    lf = pl.LazyFrame({"country": [55.0, 55.0], "v1_5501": [1, 2], "v1_2101": [1, 2]})
+    assert consolidate.country_columns(lf, "XX") == ["v1_5501"]
+    assert consolidate.country_columns(pl.LazyFrame({"country": [55, 56], "v1_5501": [1, 2]}), "") == []
+    assert asyncio.run(read.read_async(at / "AT.dta"))["age"].to_list() == [30, 40]
     assert not list(tmp_path.rglob("*.part.*"))

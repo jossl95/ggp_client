@@ -134,7 +134,7 @@ GGS-II Finland and Uruguay `.dta`) are read as latin1, which gives the same text
 from ggp_client import read
 df = read.read("data/download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/ggsii_wave1_at_v_1_1/GGSII_Wave1_AT_V_1_1.dta")
 lf = read.scan("....parquet")              # LazyFrame: parquet and csv are scanned, dta/sav/sps read first
-df = await read.read_async("....sav")      # does not block the event loop
+df = await read.read_async("....sav")      # in a thread (one file: no process start-up cost)
 dfs = await read.read_all_async(paths, concurrency=4)  # several at once: dta/sav/sps in processes
 ```
 
@@ -161,7 +161,9 @@ question, 14), `cweight_1801` (the Dutch weight, 18). The number is looked up in
 For all GGS that leaves out 2,946 variables of 39 files (GGS-II wave 1 goes from 5,642 to 4,001 columns); the
 per-country files in `download/processed` keep them, and the log says how many were left out of which file.
 
-Both keep existing files unless `force`. Everything has a plain version and an async, concurrent one; the client
+Preprocessing keeps an existing parquet unless `force`. A consolidated file is kept only while it is up to date:
+it holds exactly the files of the selected rows and is newer than all of them; after a filtered run, a new country
+or a file preprocessed again, it is made again. Everything has a plain version and an async, concurrent one; the client
 uses the async ones. Reading dta, sav and sps runs in worker processes, because pyreadstat holds Python's GIL
 (threads read 8 GGS-II files in 10.3 s, the same as one by one; 4 processes in 4.9 s). Parquet, csv and
 consolidation run on polars' own lazy, multi-threaded engine. The workers are started with `spawn`, so a script

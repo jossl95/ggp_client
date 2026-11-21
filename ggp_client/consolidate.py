@@ -11,7 +11,8 @@ and ggp_file columns say where each row came from. Everything is lazy: polars st
 Country-specific variables are left out: GGS names them after the GGP country number, <name>_<country><nn>
 (aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number comes
 from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in download/processed keep them.
-An existing result is kept unless force.
+An existing result is kept while it is up to date: it holds exactly the files of the rows given and is newer
+than all of them. Otherwise (a country added or left out, a file preprocessed again) it is made again.
 """
 import asyncio
 import logging
@@ -32,14 +33,14 @@ COUNTRY_NUMBERS = dict(AT=21, CZ=28, DE=14, DK=37, EE=22, FI=39, FR=15, GB=43, H
 
 
 def groups(rows, root, pre):
-    """{name: [(parquet file, country)]} for the preprocessed files of rows, one name per series and wave."""
+    """{name: [(parquet file, country, source path)]} for the preprocessed files of rows, per series and wave."""
     out = defaultdict(list)
     for r in rows:
         for _, rel in preprocess.sources(r, root, pre):
             f = Path(pre) / rel.with_suffix(".parquet")
             name = f"{r['series']}_{r['wave']}" if r["wave"] else r["series"]
             if f.exists():
-                out[name.lower()].append((f, r["country"]))
+                out[name.lower()].append((f, r["country"], rel.as_posix()))
     return dict(out)
 
 
@@ -49,15 +50,16 @@ def country_columns(lf, country):
     number = COUNTRY_NUMBERS.get((country or "").upper())
     own = next((c for c in names if c.lower() == "country"), None)
     if number is None and own:
-        v = lf.select(pl.col(own).drop_nulls().first()).collect().item()
+        vals = lf.select(pl.col(own).drop_nulls().unique()).collect().to_series().to_list()
+        v = vals[0] if len(vals) == 1 else None  # several countries in one file: no number of its own
         number = int(v) if isinstance(v, (int, float)) and 10 <= v < 100 else None
     return [c for c in names if number and re.search(rf"_{number}\d\d[a-z]*$", c, re.I)]
 
 
 def plan(files):
-    """The stacked LazyFrame of [(parquet file, country)], without country-specific variables."""
+    """The stacked LazyFrame of [(parquet file, country, source path)], without country-specific variables."""
     frames = []
-    for f, country in files:
+    for f, country, _ in files:
         lf = pl.scan_parquet(f, glob=False)
         if drop := country_columns(lf, country):
             log.info("consolidate: leaving out %d %s-specific variables of %s", len(drop), country, f.name)
@@ -65,12 +67,23 @@ def plan(files):
     return pl.concat(frames, how="diagonal_relaxed")
 
 
+def current(target, files):
+    """True if target was made from exactly these files (its ggp_file column) and is newer than all of them."""
+    try:
+        if target.stat().st_mtime < max(f.stat().st_mtime for f, *_ in files):
+            return False
+        have = pl.scan_parquet(target, glob=False).select(pl.col("ggp_file").unique()).collect().to_series()
+        return set(have) == {src for *_, src in files}
+    except (OSError, pl.exceptions.PolarsError):  # missing or unreadable: make it again
+        return False
+
+
 def _todo(rows, root, pre, out, force):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     todo, skipped = {}, 0
     for name, files in groups(rows, root, pre).items():
-        if (out / f"{name}.parquet").exists() and not force:
+        if not force and current(out / f"{name}.parquet", files):
             skipped += 1
         else:
             todo[name] = files
