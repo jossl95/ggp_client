@@ -53,7 +53,12 @@ class ggpClient:
         raise RuntimeError(f"giving up on {url}")
 
     async def sync(self, con, dump=None):
-        """Index the public catalogue (no login needed). Returns (found, failed) by slug."""
+        """Index the catalogue. Returns (found, failed) by slug.
+
+        The public pages need no login. Harmonized Histories and Additional Datasets are listed only
+        on the data access page, so sync logs in (see login) to add them; without a login they are
+        skipped and reported in failed, and the public part is still indexed.
+        """
         slugs = parse.parse_catalog(await self._text(parse.CATALOG_URL))
         seen, found, failed, todo = set(slugs), {}, {}, slugs
         if dump:
@@ -72,6 +77,18 @@ class ggpClient:
                 nxt += [s for s in found[slug]["other_versions"] if s not in seen]
                 seen.update(found[slug]["other_versions"])
             todo = nxt
+        try:
+            await self.login()
+            html = await self._text("/form/")
+            if dump:
+                (Path(dump) / "form.html").write_text(html, encoding="utf-8")
+            found.update(parse.parse_access(html))
+        except (RuntimeError, httpx.HTTPError) as e:  # LoginError is a RuntimeError
+            failed["data access page"] = f"Harmonized Histories and Additional Datasets skipped: {e}"
+        for slug in list(found):  # the latest version often has its own -vX-Y page too: keep only the latest row
+            base = re.sub(r"-v\d+-\d+$", "", slug)
+            if base != slug and base in found and found[base]["version"] == parse.parse_slug(slug)["version"]:
+                del found[slug]
         for slug in sorted(found, key=parse.sort_key):  # a fresh db numbers datasets in this order
             db.upsert(con, slug, found[slug])
         con.commit()

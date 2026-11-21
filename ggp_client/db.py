@@ -49,7 +49,7 @@ def upsert(con, slug, d):
         country=p["country"], country_name=d["country_name"], version=version,
         is_latest=int(p["version"] is None), upcoming=int(p["upcoming"]), title=d["title"],
         collected_from=d["collected_from"], collected_to=d["collected_to"],
-        colectica_url=d["colectica_url"], page_url=parse.page_url(slug),
+        colectica_url=d["colectica_url"], page_url=d.get("page_url") or parse.page_url(slug),
         rel_dir=rel_dir, stem=stem, synced_at=_now(),
     )
     cols = ", ".join(row)

@@ -5,7 +5,7 @@ Index and download datasets from the GGP data portal (https://www.ggp-i.org). As
 ```bash
 pip install -e .
 
-ggp-client sync                      # index everything from the public pages, no login needed
+ggp-client sync                    # index every dataset (logs in for Harmonized Histories and Additional Datasets)
 ggp-client list --project ggs --round 2 --country nl at
 ggp-client list --ids 10-25          # a range of catalogue ids
 
@@ -22,8 +22,10 @@ ggp-client download --ids 3-12,20 --all-versions
 ## Filters
 
 `project`, `round`, `wave` and `country` each take one value, several values, or nothing (all).
-They are the folder names: project `ggs` or `ffs`, round `1` or `2` (or `i`, `ii`), wave `w1`, `w2`, `pilot`, ...,
-country `nl`, `at`, ... Case does not matter. A value that is not in the catalogue is an error, not an empty result.
+They are the folder names: project `ggs`, `ffs`, `hh` (Harmonized Histories), `other` (Additional Datasets) or
+`teaching`, round `1` or `2` (or `i`, `ii`), wave `w1`, `w2`, `pilot`, ...,
+country `nl`, `at`, ... For `hh` and `other` the dataset name takes the place of the wave
+(`--project other --wave nkps`) and there is no country. Case does not matter. A value that is not in the catalogue is an error, not an empty result.
 
 From Python the same filters are arguments of `db.select`, and `ext` and `metadata` go to `ggpClient.download`:
 
@@ -51,6 +53,8 @@ Everything lives in `--data-dir` (default `ggp_files/`):
   folder, what was unpacked). Ids are assigned once and never change.
 - `downloads/<series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/`, all lowercase, one folder per downloaded file,
   for example `downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/`. FFS has no wave level: `ffs/us/ffs_us_v1.0/`.
+  Harmonized Histories and Additional Datasets: `hh/harmonized-histories/hh_harmonized-histories_<id>/`
+  (one folder per part), `other/nkps/other_nkps/`.
 - `.session.json`: your login session (mode 600), so the access link is used once, not on every run.
 
 ## Unpacking
@@ -68,7 +72,9 @@ are kept as they are in the archive. The zip itself is not kept.
 
 ## Logging in
 
-Only downloads need the emailed access link. `ggpClient.login()` (and so `ggp-client download`) looks for a login in this order:
+Downloads need the emailed access link, and so does the part of `sync` that indexes Harmonized Histories and
+Additional Datasets: they are listed only on the logged-in data access page, behind a "Show N datasets" button.
+Without a login `sync` still indexes everything else and reports what it skipped. `ggpClient.login()` (and so `ggp-client download`) looks for a login in this order:
 
 1. the saved session in `.session.json`, if it still works
 2. the `access_url` argument (`--access-url` on the command line)

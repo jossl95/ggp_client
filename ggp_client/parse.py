@@ -15,6 +15,8 @@ SERIES = {
     "ffs": ("FFS", None, "FFS"),
 }
 NO_WAVE = {"thefamilyandfertilitysurvey"}  # FFS is one survey per country
+# sections listed only on the logged-in data access page (/form/), with no dataset page: heading -> slug key
+ACCESS_SECTIONS = {"Harmonized Histories": "hh", "Additional Datasets": "other"}
 
 # ggs2-at-wave1, ggs2-at-wave1-v1-0 (older version), upcoming-ggs2-fr-wave1
 SLUG_RE = re.compile(
@@ -45,6 +47,10 @@ def slug_from_href(href):
 
 
 def parse_slug(slug):
+    key, _, name = slug.partition("-")
+    if key in ACCESS_SECTIONS.values():  # hh-..., other-...: no country or wave, the name stands in for the wave
+        return dict(key=key, project=key.upper(), round=None, series=key.upper(), country="",
+                    wave=name, version=None, upcoming=False)
     m = SLUG_RE.fullmatch(slug)
     if not m:  # unknown pattern: still indexed, under OTHER
         return dict(key=None, project="OTHER", round=None, series="OTHER", country="",
@@ -144,3 +150,31 @@ def parse_dataset(html, slug):
         files=_downloads(soup),
         other_versions=sorted(others),
     )
+
+
+def parse_access(html):
+    """Datasets listed only on the logged-in data access page, by slug: one per heading, one file per row.
+
+    These sections are hidden behind a "Show N datasets" button, but the rows are in the HTML.
+    Each list appears twice (all, then split in columns), so rows are merged by download id.
+    """
+    found = {}
+    for h2 in BeautifulSoup(html, "html.parser").find_all("h2"):
+        key = ACCESS_SECTIONS.get(" ".join(h2.get_text().split()))
+        if not key:
+            continue
+        for h3 in (h2.find_parent("section") or h2.parent).find_all("h3"):
+            title = " ".join(h3.get_text().split())
+            slug = f"{key}-" + re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+            d = found.setdefault(slug, dict(
+                title=title, country_name=None, version=None, collected_from=None, collected_to=None,
+                colectica_url=None, page_url=f"{BASE}/form/", files={}, other_versions=[]))
+            for li in h3.find_next("ul").find_all("li"):
+                a = li.find("a", href=DOWNLOAD_HREF)
+                if a:
+                    did = int(DOWNLOAD_HREF.search(a["href"])[1])
+                    label = " ".join(li.div.get_text().split()) if li.div else None
+                    d["files"][did] = dict(download_id=did, url=urljoin(BASE, a["href"]), label=label, size_mb=None)
+    for d in found.values():
+        d["files"] = list(d["files"].values())
+    return found

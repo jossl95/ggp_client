@@ -28,7 +28,8 @@ AT = """<h1>Austria – Wave 1 v1.1</h1>
 <div>Downloads: <span>Austria - Wave 1 (version 1.1) v1.1, 15.3 MB</span>
  <a href="https://ggp.colectica.org/Item/int.ggp/dd79">Browse Dataset</a>
  <a href="https://www.ggp-i.org/form/download/95/">Login to Download</a></div>
-<p>Other versions: <a href="/dataset/ggs2-at-wave1-v1-0/">View version 1.0</a></p>"""
+<p>Other versions: <a href="/dataset/ggs2-at-wave1-v1-0/">View version 1.0</a>
+<a href="/dataset/ggs2-at-wave1-v1-1/">View version 1.1</a></p>"""
 
 AT10 = """<h1>Austria – Wave 1 v1.0</h1><p>Version: 1.0</p>
 <div><span>Austria - Wave 1 (version 1.0) v1.0, 14.9 MB</span>
@@ -46,11 +47,26 @@ FFS = """<h1>USA – The Family and Fertility Survey</h1><p>Version: 1.0</p>
 PAGES = {
     "/data-catalog/": CATALOG,
     "/dataset/ggs2-at-wave1/": AT,
+    "/dataset/ggs2-at-wave1-v1-1/": AT,  # the live site also gives the latest version its own page
     "/dataset/ggs2-at-wave1-v1-0/": AT10,
     "/dataset/ggs2-nl-wave1/": NL,
     "/dataset/upcoming-ggs2-fr-wave1/": FR,
     "/dataset/ffs-us-thefamilyandfertilitysurvey/": FFS,
 }
+
+def row(label, did):
+    return f'<li><div>{label}</div><div><a href="/form/download/{did}/" target="_blank">Download</a></div></li>'
+
+
+# the logged-in data access page: hidden sections, each list twice (all, then in columns), as on the live site
+HH = f"<h3>Harmonized Histories </h3><ul>{row('Part 1', 1)}{row('Part 2', 84)}</ul>"
+EXTRA = f"<h3>NKPS</h3><ul>{row('NKPS', 61)}</ul>"
+FORM = f"""<h1>Data Access</h1><button>Logout</button>
+<section><h2>Generations and Gender Survey - Round 2 (GGS-II)</h2><h3>Austria</h3><ul>{row('Wave 1', 95)}</ul></section>
+<section x-data="{{ open: false }}"><h2>Harmonized Histories</h2><button>Show 2 datasets</button>
+ <div x-show="open"><div>{HH}</div><div>{HH}</div></div></section>
+<section x-data="{{ open: false }}"><h2>Additional Datasets</h2><button>Show 1 datasets</button>
+ <div x-show="open"><div>{EXTRA}</div><div><div>{EXTRA}</div></div></div></section>"""
 TOKEN = "https://www.ggp-i.org/form/accounts/login/email/s3cr3t/"
 
 
@@ -82,7 +98,9 @@ def handler(req):
         return httpx.Response(200, text="ok", headers={"set-cookie": "sessionid=s1; Path=/"})
     if p == "/form/":
         ok = "sessionid=s1" in req.headers.get("cookie", "")
-        return httpx.Response(200, text="Welcome" if ok else "we'll send you a secure login link")
+        return httpx.Response(200, text=FORM if ok else "we'll send you a secure login link")
+    if p in ("/form/download/1/", "/form/download/84/", "/form/download/61/"):
+        return httpx.Response(200, content=make_zip({"x.dta": b"d"}), headers={"content-type": "application/zip"})
     if p == "/form/download/95/":
         return httpx.Response(200, content=AT_ZIP, headers={
             "content-type": "application/zip", "content-disposition": 'attachment; filename="AT_w1.zip"'})
@@ -120,7 +138,7 @@ def test_dataset_page():
     assert d["version"] == "1.1" and d["country_name"] == "Austria"
     assert (d["collected_from"], d["collected_to"]) == ("2022-10-31", "2023-03-12")
     assert d["colectica_url"].endswith("/c7fc")
-    assert d["other_versions"] == ["ggs2-at-wave1-v1-0"]
+    assert d["other_versions"] == ["ggs2-at-wave1-v1-0", "ggs2-at-wave1-v1-1"]
     assert d["files"] == [dict(download_id=95, url="https://www.ggp-i.org/form/download/95/",
                                label="Austria - Wave 1 (version 1.1) v1.1", size_mb=15.3)]
     assert parse.parse_dataset(NL, "ggs2-nl-wave1")["files"][0]["size_mb"] == 1228.8
@@ -171,13 +189,14 @@ def test_sync_download_select(tmp_path):
             return found, failed, rows, await p.download(con, rows, tmp_path / "dl")
 
     found, failed, rows, (done, skipped, bad) = asyncio.run(first())
-    assert len(found) == 5 and not failed  # the old version is found through "other versions"
-    # ids follow project, round, wave, country: FFS first, then GGS-II w1 AT, AT v1.0, FR, NL
+    assert len(found) == 7 and not failed  # v1.0 via "other versions" (v1.1 is the latest: one row), HH, NKPS via the access page
+    # ids follow project, round, wave, country: FFS first, then GGS-II w1 AT, AT v1.0, FR, NL, then HH, OTHER
     ids = {r["slug"]: r["id"] for r in db.select(con, all_versions=True)}
     assert ids == {"ffs-us-thefamilyandfertilitysurvey": 1, "ggs2-at-wave1": 2, "ggs2-at-wave1-v1-0": 3,
-                   "upcoming-ggs2-fr-wave1": 4, "ggs2-nl-wave1": 5}
+                   "upcoming-ggs2-fr-wave1": 4, "ggs2-nl-wave1": 5, "hh-harmonized-histories": 6, "other-nkps": 7}
     assert [r["slug"] for r in db.select(con)] == [
-        "ffs-us-thefamilyandfertilitysurvey", "ggs2-at-wave1", "upcoming-ggs2-fr-wave1", "ggs2-nl-wave1"]
+        "ffs-us-thefamilyandfertilitysurvey", "ggs2-at-wave1", "upcoming-ggs2-fr-wave1", "ggs2-nl-wave1",
+        "hh-harmonized-histories", "hh-harmonized-histories", "other-nkps"]  # one row per file: HH has two
     assert [r["id"] for r in db.select(con, ids=db.parse_ids("2-3,5"), all_versions=True)] == [2, 3, 5]
 
     def slugs(**kw):
@@ -186,7 +205,9 @@ def test_sync_download_select(tmp_path):
     nl, at, fr = "ggs2-nl-wave1", "ggs2-at-wave1", "upcoming-ggs2-fr-wave1"
     assert slugs(country="nl") == slugs(country="NL") == [nl]  # one value, any case
     assert slugs(country=["nl", "at"]) == [at, nl]  # a list
-    assert len(slugs()) == len(slugs(project=None, country=[])) == 4  # default: all
+    assert len(slugs()) == len(slugs(project=None, country=[])) == 7  # default: all
+    assert slugs(project=["hh", "other"]) == ["hh-harmonized-histories"] * 2 + ["other-nkps"]
+    assert slugs(project="other", wave="NKPS") == ["other-nkps"]
     assert slugs(project="ggs", round=2, wave=1, country=["nl", "at"]) == [at, nl]  # bare 1 means w1
     assert slugs(round="ii") == slugs(round=2) == [at, fr, nl]
     with pytest.raises(ValueError, match="unknown round"):
@@ -195,7 +216,7 @@ def test_sync_download_select(tmp_path):
         db.select(con, country=["nl", "xx"])
 
     # default download: datafiles only, in a folder per file, zip contents and nested zips mirrored
-    assert (done, skipped) == (2, 0)
+    assert (done, skipped) == (5, 0)
     assert [b[0] for b in bad] == ["ggs2-nl-wave1"] and "web page" in bad[0][1]
     at_dir = tmp_path / "dl/ggs-ii/w1/at/ggs2_w1_at_v1.1"
     ffs_dir = tmp_path / "dl/ffs/us/ffs_us_v1.0"
@@ -216,13 +237,16 @@ def test_sync_download_select(tmp_path):
                 return res[:2]
         return asyncio.run(go())
 
-    assert again() == (0, 2)  # same request: nothing to do
-    assert again(ext="dta") == (0, 2)  # a subset of what was already unpacked
-    assert again(metadata=True) == (2, 0)  # documentation was not kept yet: fetched again, added
+    assert tree(tmp_path / "dl/hh/harmonized-histories") == [
+        "hh_harmonized-histories_1/x.dta", "hh_harmonized-histories_84/x.dta"]  # two files: a folder each
+    assert tree(tmp_path / "dl/other/nkps") == ["other_nkps/x.dta"]
+    assert again() == (0, 5)  # same request: nothing to do
+    assert again(ext="dta") == (0, 5)  # a subset of what was already unpacked
+    assert again(metadata=True) == (5, 0)  # documentation was not kept yet: fetched again, added
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav", "docs/Codebook.pdf"]
     assert tree(ffs_dir) == ["ffs/waves/notes.txt", "ffs/waves/wave1/us1.dta",
                              "ffs/waves/wave1/us1.sav", "readme.txt"]
-    assert again(metadata=True) == (0, 2)
+    assert again(metadata=True) == (0, 5)
 
 
 def test_ext_without_matches_fails_and_leaves_no_folder(tmp_path):
@@ -304,3 +328,28 @@ def test_resync_drops_replaced_links_and_ids_accept_reversed_ranges():
 def test_concurrency_must_be_positive(tmp_path):
     with pytest.raises(ValueError):
         ggpClient(tmp_path, concurrency=0)
+
+
+def test_access_page_sections():
+    found = parse.parse_access(FORM)
+    assert sorted(found) == ["hh-harmonized-histories", "other-nkps"]  # GGS-II rows come from the public pages
+    assert [(f["download_id"], f["label"]) for f in found["hh-harmonized-histories"]["files"]] == [
+        (1, "Part 1"), (84, "Part 2")]  # the repeated list is merged
+    p = parse.parse_slug("other-nkps")
+    assert (p["project"], p["wave"], p["country"]) == ("OTHER", "nkps", "")
+    assert parse.naming(parse.parse_slug("hh-harmonized-histories"), "x", None) == (
+        "hh/harmonized-histories", "hh_harmonized-histories")
+
+
+def test_sync_without_login_still_indexes_the_public_pages(tmp_path, monkeypatch):
+    monkeypatch.setattr("getpass.getpass", no_terminal)
+    monkeypatch.delenv("GGP_ACCESS_URL", raising=False)
+    con = db.connect(tmp_path / "c.sqlite")
+
+    async def go():
+        async with portal(tmp_path) as p:
+            return await p.sync(con)
+
+    found, failed = asyncio.run(go())
+    assert len(found) == 5 and list(failed) == ["data access page"]
+    assert "skipped" in failed["data access page"]

@@ -16,8 +16,13 @@ def positive(v):
     return int(v)
 
 
+def add_access_url(ap):
+    ap.add_argument("--access-url", help="the emailed link; default: GGP_ACCESS_URL, else you are asked "
+                                         "(a flag ends up in your shell history)")
+
+
 def add_filters(ap):
-    ap.add_argument("--project", nargs="+", default=[], help="ggs, ffs (default: all)")
+    ap.add_argument("--project", nargs="+", default=[], help="ggs, ffs, hh, other, teaching (default: all)")
     ap.add_argument("--round", nargs="+", default=[], help="1 or 2, or i, ii (default: all)")
     ap.add_argument("--wave", nargs="+", default=[], help="w1 w2 pilot ... (default: all)")
     ap.add_argument("--country", nargs="+", default=[], help="country codes, e.g. nl at (default: all)")
@@ -49,15 +54,15 @@ def main(argv=None):
     ap.add_argument("--data-dir", default="ggp_files", help="catalogue, downloads and session live here")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("sync", help="index all datasets from the public pages (no login needed)")
+    s = sub.add_parser("sync", help="index all datasets (Harmonized Histories and Additional Datasets need a login)")
     s.add_argument("--dump", metavar="DIR", help="also save the raw HTML pages, for debugging the parser")
+    add_access_url(s)
 
     add_filters(sub.add_parser("list", help="show indexed datasets"))
 
     d = sub.add_parser("download", help="download and unpack datasets (needs the emailed access link)")
     add_filters(d)
-    d.add_argument("--access-url", help="the emailed link; default: GGP_ACCESS_URL, else you are asked "
-                                        "(a flag ends up in your shell history)")
+    add_access_url(d)
     d.add_argument("--concurrency", type=positive, default=3)
     d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three)")
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
@@ -70,7 +75,7 @@ def main(argv=None):
 
     if a.cmd == "sync":
         async def run():
-            async with ggpClient(data) as p:
+            async with ggpClient(data, a.access_url) as p:
                 return await p.sync(con, a.dump)
         try:
             found, failed = asyncio.run(run())
