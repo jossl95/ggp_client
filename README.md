@@ -22,10 +22,25 @@ ggp-client consolidate --project ggs # stacked per round and wave in data/downlo
 
 `list` takes the same filters as `download`, so use it as a dry run.
 
-To get all GGS data, rounds 1 and 2 with every datafile type (dta, sav, csv), run the script at the root:
-`python download_ggs.py` (into `data/download/raw`, or `python download_ggs.py some_dir`). In November 2026 that was 69 files, a 0.5 GB
-download and 7.6 GB unpacked, in about 2 minutes. Three GGS-I files (Australia waves 1 and 2, Norway wave 1) give
-"404 Not Found" on the portal itself, so the script reports them and exits with 1.
+To get all GGS data, rounds 1 and 2, consolidated per round and wave, run the script at the root:
+`python download_ggs.py` (or `python download_ggs.py some_dir`). It downloads every GGS dataset as `.dta`
+(`data/download/raw`), preprocesses each to parquet with a `.meta.json` of its labels (`data/download/processed`),
+and consolidates per round and wave into `data/download/consolidated`:
+
+```
+ggs-ii_w1.parquet     all countries stacked; labels in ggs-ii_w1.meta.json (column_labels, value_labels)
+ggs-ii_w1.meta.json
+ggs-ii_w1.dta         the same for Stata, with the variable and value labels applied
+ggs-i_w1.*, ggs-i_w2.*, ggs-i_w3.*, ggs-ii_w2.*, ggs-ii_pilot.*, ...
+```
+
+In November 2026 that was 69 files and 10 consolidated datasets (GGS-II wave 1: 185,660 rows, 4,001 variables,
+3,993 with a label, 3,410 with value labels), in about 6 minutes from scratch. Three GGS-I files (Australia
+waves 1 and 2, Norway wave 1) give "404 Not Found" on the portal itself, so the script reports them and exits with 1.
+The Stata files are big, 7 GB for all ten (GGS-II wave 1: 3.3 GB, against 36 MB as parquet): Stata stores every
+value uncompressed and pyreadstat writes whole numbers as 4-byte longs; `compress` in Stata shrinks them further.
+Text longer than 2,045 characters is cut in the `.dta` (pyreadstat cannot write Stata's strL); the log names those
+columns. Work already done is kept: a second run only redoes what changed.
 
 Some GGS-I files mix text encodings in their labels; if Python's pyreadstat refuses one, pass
 `encoding="latin1"` (or use `pandas.read_stata`). Stata and SPSS open them as they are.
@@ -153,6 +168,12 @@ Columns are matched by name; a column a country lacks is null there, and a colum
 and text in another becomes text. It holds the countries of the rows you select, so filter by country only if you
 want a smaller file of that name. A dataset shipped as two files is in it twice; tell them apart by `ggp_file`
 (GGS-II Belarus wave 1 comes in English and Russian, `..._RU.dta`).
+
+Each consolidated file gets `<name>.meta.json`: the variable and value labels of its input files, for the variables
+it kept. Where countries label a code differently, the first file (in catalogue order) wins.
+`consolidate.to_stata(parquet)` (or `to_stata_async([...])`, in processes) writes `<name>.dta` from the parquet and
+its meta.json with the labels applied. Stata attaches value labels to whole numbers only, so they go on integer
+columns and on decimal columns that hold only whole numbers; columns that are empty everywhere become numeric.
 
 Country-specific variables are left out of the consolidated files. GGS names them after the GGP country number:
 `<name>_<number><nn>`, for example `aut01a_2101` (Austria is 21), `a837_1401` (Germany's own work schedule

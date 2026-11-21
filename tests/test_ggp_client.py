@@ -501,9 +501,22 @@ def test_ffs_unpack_names_like_estonia(tmp_path):
     assert list(df.columns) == ["IND01_01"] and m.variable_value_labels["IND01_01"] == {1: "yes", 2: "no"}
 
 
-def test_download_ggs_script(tmp_path, capsys):
+def test_download_ggs_script(tmp_path, capsys, monkeypatch):
     import importlib.util
+    import json
     import pathlib
+    import sys
+    import pandas as pd
+    import polars as pl
+    import pyreadstat
+    dta = tmp_path / "AT_w1.dta"  # a real labelled file in the fake AT download
+    pyreadstat.write_dta(pd.DataFrame({"age": [1.0, 2.0, None], "aut01_2101": [1, 1, 1], "note": ["a", "b", "x" * 3000],
+                                       "empty": [None, None, None]}).astype({"empty": "float64"}), dta,
+                         column_labels=["Age group", "AT only", "Note", "Empty"],
+                         variable_value_labels={"age": {1: "young", 2: "old"}})
+    monkeypatch.setattr(sys.modules[__name__], "AT_ZIP", make_zip({"Data/AT_w1.dta": dta.read_bytes(),
+                                                                   "Data/AT_w1.sav": b"sav"}))
+    dta.unlink()
     path = pathlib.Path(__file__).parent.parent / "download_ggs.py"
     spec = importlib.util.spec_from_file_location("download_ggs", path)
     script = importlib.util.module_from_spec(spec)
@@ -511,9 +524,19 @@ def test_download_ggs_script(tmp_path, capsys):
     code = asyncio.run(script.main(tmp_path, access_url=TOKEN, transport=httpx.MockTransport(handler)))
     assert code == 1  # the fake NL file is a web page: reported, and the exit code says so
     out = capsys.readouterr().out
-    assert "downloaded 1, skipped 0 already present, failed 1" in out and "failed: ggs2-nl-wave1" in out
-    assert tree(tmp_path / "download/raw") == [  # GGS only (no FFS, HH, other), every datafile type kept
-        "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.dta", "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.sav"]
+    assert "download: 1 done, 0 skipped (already there), 1 failed" in out and "failed: download: ggs2-nl-wave1" in out
+    assert "stata: 1 done" in out
+    assert tree(tmp_path / "download/raw") == ["ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.dta"]  # GGS only, dta only
+    cons = tmp_path / "download/consolidated"
+    assert tree(cons) == ["ggs-ii_w1.dta", "ggs-ii_w1.meta.json", "ggs-ii_w1.parquet"]
+    meta = json.loads((cons / "ggs-ii_w1.meta.json").read_text())
+    assert meta["value_labels"]["age"] == {"1": "young", "2": "old"} and "aut01_2101" not in meta["column_labels"]
+    assert "aut01_2101" not in pl.read_parquet_schema(cons / "ggs-ii_w1.parquet")  # country-specific: left out
+    df, m = pyreadstat.read_dta(cons / "ggs-ii_w1.dta", output_format="polars")
+    assert m.variable_value_labels["age"] == {1: "young", 2: "old"} and m.column_names_to_labels["age"] == "Age group"
+    assert df["ggp_country"].to_list() == ["AT"] * 3 and len(df["note"][2]) == 2045  # text cut to Stata's limit
+    assert asyncio.run(script.main(tmp_path, access_url=TOKEN, transport=httpx.MockTransport(handler))) == 1
+    assert "stata: 0 done, 1 skipped" in capsys.readouterr().out  # up to date: kept
 
 
 def test_read_preprocess_and_consolidate(tmp_path):

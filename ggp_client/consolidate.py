@@ -11,10 +11,13 @@ and ggp_file columns say where each row came from. Everything is lazy: polars st
 Country-specific variables are left out: GGS names them after the GGP country number, <name>_<country><nn>
 (aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number comes
 from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in download/processed keep them.
+Each result gets <name>.meta.json: the variable and value labels of its input files (the first file wins where
+countries differ). to_stata() writes <name>.dta from the two, with the labels applied.
 An existing result is kept while it is up to date: it holds exactly the files of the rows given and is newer
 than all of them. Otherwise (a country added or left out, a file preprocessed again) it is made again.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -22,8 +25,9 @@ from collections import defaultdict
 from pathlib import Path
 
 import polars as pl
+import pyreadstat
 
-from . import preprocess
+from . import preprocess, read
 
 log = logging.getLogger("ggp_client")
 
@@ -70,7 +74,7 @@ def plan(files):
 def current(target, files):
     """True if target was made from exactly these files (its ggp_file column) and is newer than all of them."""
     try:
-        if target.stat().st_mtime < max(f.stat().st_mtime for f, *_ in files):
+        if target.stat().st_mtime < max(f.stat().st_mtime for f, *_ in files) or not _meta(target).exists():
             return False
         have = pl.scan_parquet(target, glob=False).select(pl.col("ggp_file").unique()).collect().to_series()
         return set(have) == {src for *_, src in files}
@@ -90,9 +94,112 @@ def _todo(rows, root, pre, out, force):
     return todo, skipped
 
 
+def _meta(parquet):
+    return parquet.with_suffix(".meta.json")
+
+
+def merged_meta(files, columns):
+    """The labels of a consolidated file: those of its input files' meta.json, for the columns it kept.
+
+    A variable gets the first label found; its value labels are the union, the first file winning a code that
+    countries label differently.
+    """
+    out = dict(column_labels={}, value_labels={})
+    for f, *_ in files:
+        if not _meta(f).exists():  # csv sources have none
+            continue
+        m = json.loads(_meta(f).read_text(encoding="utf-8"))
+        for c, label in m["column_labels"].items():
+            if label and c in columns:
+                out["column_labels"].setdefault(c, label)
+        for c, labels in m["value_labels"].items():
+            if c in columns:
+                d = out["value_labels"].setdefault(c, {})
+                for k, v in labels.items():
+                    d.setdefault(k, v)
+    return out
+
+
 def _done(out, name, files):
-    os.replace(out / f"{name}.part.parquet", out / f"{name}.parquet")
+    target = out / f"{name}.parquet"
+    columns = set(pl.read_parquet_schema(out / f"{name}.part.parquet"))
+    _meta(target).write_text(json.dumps(merged_meta(files, columns), ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(out / f"{name}.part.parquet", target)  # last: a parquet without its meta.json is never current
     log.info("consolidated %d files into %s.parquet", len(files), name)
+
+
+STATA_TEXT = 2045  # the longest text pyreadstat writes to Stata (no strL)
+STATA_LONG = (-2_147_483_647, 2_147_483_620)  # the values a Stata value label can have
+
+
+def _code(k):
+    """A value-label code from meta.json ("1", "1.0") as a Stata integer, or None if it cannot be one."""
+    try:
+        f = float(k)
+    except ValueError:
+        return None
+    return int(f) if f.is_integer() and STATA_LONG[0] <= f <= STATA_LONG[1] else None
+
+
+def to_stata(parquet, force=False):
+    """Write <name>.dta next to a consolidated <name>.parquet, with the labels of its meta.json applied.
+
+    Stata labels whole numbers only, so value labels go on integer columns and on decimal columns that hold
+    only whole numbers. Text longer than 2045 characters is cut. Kept while newer than the parquet, unless
+    force. Returns the columns whose text was cut ([] if none), or None when the .dta was kept.
+    """
+    parquet = Path(parquet)
+    target = parquet.with_suffix(".dta")
+    if not force and target.exists() and target.stat().st_mtime >= parquet.stat().st_mtime:
+        return None
+    m = json.loads(_meta(parquet).read_text(encoding="utf-8"))
+    df = read.read(parquet)
+    cut = [c for c, t in df.schema.items() if t == pl.String and (df[c].str.len_chars().max() or 0) > STATA_TEXT]
+    df = df.with_columns(pl.col(pl.Null).cast(pl.Int8), pl.col(pl.String).str.slice(0, STATA_TEXT))  # empty: numeric
+    whole = {c for c, t in df.schema.items() if t.is_integer()}
+    if floats := [c for c, t in df.schema.items() if t.is_float()]:
+        flags = df.select(((pl.col(c) % 1 == 0) | pl.col(c).is_null()).all() for c in floats).row(0)
+        whole |= {c for c, ok in zip(floats, flags) if ok}
+    if whole:  # whole numbers as 4-byte Stata longs, not 8-byte doubles: half the file (Stata's compress does more)
+        lo, hi = df.select(pl.col(sorted(whole)).min()).row(0), df.select(pl.col(sorted(whole)).max()).row(0)
+        df = df.with_columns(pl.col(c).cast(pl.Int32) for c, a, b in zip(sorted(whole), lo, hi)
+                             if a is None or (STATA_LONG[0] <= a and b <= STATA_LONG[1]))
+    labels = {c: {code: v for k, v in d.items() if (code := _code(k)) is not None}
+              for c, d in m["value_labels"].items() if c in whole}
+    part = target.with_name(target.stem + ".part.dta")  # pyreadstat wants the real extension
+    try:
+        pyreadstat.write_dta(df, part, column_labels=[(m["column_labels"].get(c) or "")[:80] or None for c in df.columns],
+                             variable_value_labels={c: d for c, d in labels.items() if d})
+        os.replace(part, target)
+    finally:
+        part.unlink(missing_ok=True)
+    return cut
+
+
+async def to_stata_async(parquets, force=False, concurrency=2):
+    """to_stata() for several files, `concurrency` at a time in processes (pyreadstat holds the GIL).
+
+    Each file is held whole in memory while it is written: keep concurrency low for big files.
+    Returns (done, skipped, [(file, error)]).
+    """
+    loop, failed, done = asyncio.get_running_loop(), [], 0
+
+    async def one(p):
+        nonlocal done
+        try:
+            cut = await loop.run_in_executor(ex, to_stata, p, force)
+            if cut is not None:
+                done += 1
+                log.info("to_stata: wrote %s", Path(p).with_suffix(".dta").name)
+            if cut:
+                log.warning("to_stata: %s: text cut to %d characters in %s", Path(p).name, STATA_TEXT, ", ".join(cut))
+        except Exception as e:
+            failed.append((Path(p).name, str(e) or type(e).__name__))
+            log.error("to_stata failed %s: %s", *failed[-1])
+
+    with read.pool(concurrency) as ex:
+        await asyncio.gather(*(one(p) for p in parquets))
+    return done, len(parquets) - done - len(failed), failed
 
 
 def consolidate(rows, root, pre, out, force=False):
