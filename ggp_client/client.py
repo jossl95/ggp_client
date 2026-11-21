@@ -24,6 +24,8 @@ class ggpClient:
         self.dir.mkdir(parents=True, exist_ok=True)
         # secret: never logged, stored or put in error messages
         self.access_url = access_url or os.environ.get("GGP_ACCESS_URL")
+        if concurrency < 1:
+            raise ValueError("concurrency must be 1 or more")  # 0 would wait forever
         self.sem = asyncio.Semaphore(concurrency)
         self.client = httpx.AsyncClient(
             base_url=parse.BASE, follow_redirects=True, timeout=60,
@@ -46,7 +48,8 @@ class ggpClient:
                     return r.text
             except httpx.TransportError:
                 pass
-            await asyncio.sleep(2 ** attempt)
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
         raise RuntimeError(f"giving up on {url}")
 
     async def sync(self, con, dump=None):
@@ -84,11 +87,14 @@ class ggpClient:
         and if neither is set you are asked for it (input hidden, it works as a password).
         """
         jar = self.dir / ".session.json"
-        if jar.exists():
-            for c in json.loads(jar.read_text()):
-                self.client.cookies.set(c["name"], c["value"], domain=c["domain"], path=c["path"])
-            if await self._logged_in():
-                return
+        try:
+            saved = json.loads(jar.read_text())
+        except (OSError, ValueError):  # no file, or a half-written one: log in again
+            saved = []
+        for c in saved:
+            self.client.cookies.set(c["name"], c["value"], domain=c["domain"], path=c["path"])
+        if saved and await self._logged_in():
+            return
         url = (self.access_url or "").strip()
         if not url:
             try:
@@ -109,8 +115,11 @@ class ggpClient:
             raise LoginError("the access link was not accepted (expired or already used?)")
         cookies = [dict(name=c.name, value=c.value, domain=c.domain, path=c.path)
                    for c in self.client.cookies.jar]
-        with os.fdopen(os.open(jar, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        tmp = jar.with_suffix(".tmp")  # write then rename: a crash never leaves a broken session file
+        tmp.unlink(missing_ok=True)  # O_EXCL below then always creates it with mode 600
+        with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             json.dump(cookies, f)
+        os.replace(tmp, jar)
 
     async def download(self, con, rows, root, force=False, ext=None, metadata=False):
         """Download the files of `rows` and unpack them under root.

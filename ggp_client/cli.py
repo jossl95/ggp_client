@@ -10,6 +10,12 @@ from . import db, parse
 from .client import LoginError, ggpClient
 
 
+def positive(v):
+    if int(v) < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
+    return int(v)
+
+
 def add_filters(ap):
     ap.add_argument("--project", nargs="+", default=[], help="ggs, ffs (default: all)")
     ap.add_argument("--round", nargs="+", default=[], help="1 or 2, or i, ii (default: all)")
@@ -52,7 +58,7 @@ def main(argv=None):
     add_filters(d)
     d.add_argument("--access-url", help="the emailed link; default: GGP_ACCESS_URL, else you are asked "
                                         "(a flag ends up in your shell history)")
-    d.add_argument("--concurrency", type=int, default=3)
+    d.add_argument("--concurrency", type=positive, default=3)
     d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three)")
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
     d.add_argument("--force", action="store_true", help="download again even if the file exists")

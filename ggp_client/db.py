@@ -64,6 +64,10 @@ def upsert(con, slug, d):
             "label=excluded.label, size_mb=excluded.size_mb, url=excluded.url",
             (f["download_id"], ds_id, f["label"], f["size_mb"], f["url"]),
         )
+    if d["files"]:  # a link replaced on the page; a page with no link at all keeps its old rows
+        keep = [f["download_id"] for f in d["files"]]
+        con.execute(f"DELETE FROM file WHERE dataset_id=? AND download_id NOT IN ({','.join('?' * len(keep))})",
+                    (ds_id, *keep))
 
 
 def mark_downloaded(con, download_id, rel_path, kept):
@@ -75,11 +79,11 @@ def mark_downloaded(con, download_id, rel_path, kept):
 
 
 def parse_ids(spec):
-    """'3-7,10' -> [(3, 7), (10, 10)]"""
+    """'3-7,10' -> [(3, 7), (10, 10)]; a reversed range '7-3' is read as 3-7."""
     out = []
     for part in spec.split(","):
         lo, _, hi = part.strip().partition("-")
-        out.append((int(lo), int(hi or lo)))
+        out.append(tuple(sorted((int(lo), int(hi or lo)))))
     return out
 
 

@@ -29,8 +29,7 @@ From Python the same filters are arguments of `db.select`, and `ext` and `metada
 
 ```python
 import asyncio
-from ggp_client import db
-from ggp_client.client import ggpClient
+from ggp_client import db, ggpClient
 
 con = db.connect("ggp_files/catalogue.sqlite")
 rows = db.select(con, project="ggs", round=2, wave=["w1", "w2"], country=None, downloadable=True)

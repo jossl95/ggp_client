@@ -279,3 +279,28 @@ def test_login_uses_the_environment_variable_before_asking(tmp_path, monkeypatch
     monkeypatch.setenv("GGP_ACCESS_URL", TOKEN)
     login(tmp_path)
     assert (tmp_path / ".session.json").exists()
+
+
+def test_broken_session_file_means_log_in_again(tmp_path, monkeypatch):
+    monkeypatch.setattr("getpass.getpass", no_terminal)
+    (tmp_path / ".session.json").write_text("")  # a write that was cut off
+    (tmp_path / ".session.json").chmod(0o644)
+    login(tmp_path, TOKEN)
+    assert os.stat(tmp_path / ".session.json").st_mode & 0o777 == 0o600
+    login(tmp_path)  # and the new one is valid
+
+
+def test_resync_drops_replaced_links_and_ids_accept_reversed_ranges():
+    con = db.connect(":memory:")
+    page = dict(version="1.0", country_name="AT", title="t", collected_from=None, collected_to=None,
+                colectica_url=None)
+    for files in ([95], [97], []):  # link 95 replaced by 97, then a page where no link was found
+        db.upsert(con, "ggs2-at-wave1", {**page, "files": [
+            dict(download_id=i, label="a", size_mb=1, url=f"u{i}") for i in files]})
+    assert [(r["download_id"], r["n_files"]) for r in db.select(con)] == [(97, 1)]
+    assert db.parse_ids("12-3, 5") == [(3, 12), (5, 5)]
+
+
+def test_concurrency_must_be_positive(tmp_path):
+    with pytest.raises(ValueError):
+        ggpClient(tmp_path, concurrency=0)
