@@ -2,6 +2,7 @@
 dataset pages (not raw markup from the site), served through httpx.MockTransport."""
 import asyncio
 import io
+import logging
 import os
 import zipfile
 
@@ -280,6 +281,16 @@ def test_sync_download_select(tmp_path):
     assert again(metadata=True) == (0, 5)
     assert again(force=True) == (5, 0)  # force: everything again, existing files overwritten
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
+
+    # every run is in the log next to the data, the access link never is
+    text = (tmp_path / "ggp_client.log").read_text()
+    assert "INFO sync: indexed 7 datasets, 0 failed" in text
+    assert "INFO login: logged in with the access link" in text and "INFO login: saved session reused" in text
+    assert "INFO downloaded ggs2-at-wave1: " in text and "files kept in ggs-ii/w1/at/ggs2_w1_at_v1.1" in text
+    assert "ERROR failed ggs2-nl-wave1: got a web page" in text
+    assert "INFO skipped ffs-us-thefamilyandfertilitysurvey: already in ffs/us/ffs_us_v1.0" in text
+    assert "s3cr3t" not in text
+    assert not logging.getLogger("ggp_client").handlers  # each client removes its file handler on exit
 
 
 def test_ext_without_matches_fails_and_leaves_no_folder(tmp_path):

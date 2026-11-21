@@ -55,6 +55,14 @@ Everything lives in `--data-dir` (default `ggp_data/`):
   Harmonized Histories and Additional Datasets: `hh/harmonized-histories/hh_harmonized-histories_<id>/`
   (one folder per part), `other/nkps/other_nkps/`.
 - `.session.json`: your login session (mode 600), so the access link is used once, not on every run.
+- `ggp_client.log`: every sync and download with a time stamp: logins, each file downloaded (size, files kept,
+  folder), skipped or failed (with the reason), and retries. The access link is never logged.
+
+## Logging
+
+The client logs to the standard `logging` logger `"ggp_client"` (level INFO unless you set one) and appends the
+same lines to `ggp_client.log` in the data folder. The command line also shows them on the terminal.
+For more or less detail from Python: `logging.getLogger("ggp_client").setLevel(logging.WARNING)`.
 
 ## Unpacking
 

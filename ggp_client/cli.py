@@ -1,6 +1,7 @@
 """Command line: sync the catalogue, list datasets, download them."""
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -71,6 +72,7 @@ def main(argv=None):
 
     a = ap.parse_args(argv)
     data = Path(a.data_dir)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 
     if a.cmd == "sync":
         async def run():

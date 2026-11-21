@@ -15,6 +15,8 @@ import httpx
 from . import db, extract, parse
 
 logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print request URLs: the access link is one
+log = logging.getLogger("ggp_client")  # never log access_url: it works as a password
+LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
 
 
 class LoginError(RuntimeError):
@@ -28,6 +30,7 @@ class ggpClient:
     project, round, wave, country, ids and all_versions are the filters of db.select;
     None means all. self.rows is refreshed after sync and download.
     force: download and overwrite even files that already exist; by default existing files are never touched.
+    Sync and downloads are logged to the "ggp_client" logger and to data_dir/ggp_client.log.
     """
     data_dir: str | Path = "ggp_data"
     access_url: str | None = field(default=None, repr=False)  # secret: never logged, stored or put in errors
@@ -54,6 +57,11 @@ class ggpClient:
             base_url=parse.BASE, follow_redirects=True, timeout=60,
             transport=self.transport, headers={"User-Agent": "ggp-client/0.1"},
         )
+        self._log_file = logging.FileHandler(self.dir / "ggp_client.log", encoding="utf-8")
+        self._log_file.setFormatter(logging.Formatter(LOG_FORMAT))
+        log.addHandler(self._log_file)
+        if log.level == logging.NOTSET:  # INFO by default; a level you set yourself is kept
+            log.setLevel(logging.INFO)
 
     def select(self):
         """The downloadable rows that match this client's filters."""
@@ -65,6 +73,8 @@ class ggpClient:
 
     async def __aexit__(self, *exc):
         await self.client.aclose()
+        log.removeHandler(self._log_file)
+        self._log_file.close()
 
     async def _text(self, url):
         for attempt in range(3):
@@ -74,8 +84,10 @@ class ggpClient:
                 if r.status_code < 500:
                     r.raise_for_status()
                     return r.text
-            except httpx.TransportError:
-                pass
+            except httpx.TransportError as e:
+                log.warning("%s: %s, attempt %d of 3", url, type(e).__name__, attempt + 1)
+            else:
+                log.warning("%s: HTTP %d, attempt %d of 3", url, r.status_code, attempt + 1)
             if attempt < 2:
                 await asyncio.sleep(2 ** attempt)
         raise RuntimeError(f"giving up on {url}")
@@ -98,6 +110,7 @@ class ggpClient:
             for slug, html in zip(todo, pages):
                 if isinstance(html, Exception):
                     failed[slug] = str(html) or type(html).__name__
+                    log.error("sync: %s failed: %s", slug, failed[slug])
                     continue
                 if dump:
                     (Path(dump) / f"{slug}.html").write_text(html, encoding="utf-8")
@@ -113,6 +126,7 @@ class ggpClient:
             found.update(parse.parse_access(html))
         except (RuntimeError, httpx.HTTPError) as e:  # LoginError is a RuntimeError
             failed["data access page"] = f"Harmonized Histories and Additional Datasets skipped: {e}"
+            log.warning("sync: %s", failed["data access page"])
         for slug in list(found):  # the latest version often has its own -vX-Y page too: keep only the latest row
             base = re.sub(r"-v\d+-\d+$", "", slug)
             if base != slug and base in found and found[base]["version"] == parse.parse_slug(slug)["version"]:
@@ -121,6 +135,7 @@ class ggpClient:
             db.upsert(self.con, slug, found[slug])
         self.con.commit()
         self.rows = self.select()
+        log.info("sync: indexed %d datasets, %d failed", len(found), len(failed))
         return found, failed
 
     async def _logged_in(self):
@@ -140,6 +155,7 @@ class ggpClient:
         for c in saved:
             self.client.cookies.set(c["name"], c["value"], domain=c["domain"], path=c["path"])
         if saved and await self._logged_in():
+            log.info("login: saved session reused")
             return
         url = (self.access_url or "").strip()
         if not url:
@@ -166,6 +182,7 @@ class ggpClient:
         with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
             json.dump(cookies, f)
         os.replace(tmp, jar)
+        log.info("login: logged in with the access link, session saved")
 
     async def download(self, rows=None, root=None, ext=None, metadata=False):
         """Download the files of `rows` (default: self.rows) and unpack them under root (default: data_dir/downloads).
@@ -189,16 +206,22 @@ class ggpClient:
             if (not self.force and r["local_path"] and (root / r["local_path"]).exists()
                     and kept <= set((r["fetched"] or "").split())):
                 skipped += 1
+                log.info("skipped %s: already in %s", r["slug"], r["local_path"])
                 return
+            log.info("downloading %s (file %d)", r["slug"], r["download_id"])
             try:
-                rel = await self._fetch(r, root, want, metadata)
+                rel, n, size = await self._fetch(r, root, want, metadata)
             except Exception as e:  # one bad file must not stop the batch
                 failed.append((r["slug"], str(e) or type(e).__name__))
+                log.error("failed %s: %s", r["slug"], failed[-1][1])
                 return
             db.mark_downloaded(self.con, r["download_id"], rel, kept)
             done += 1
+            log.info("downloaded %s: %.1f MB, %d files kept in %s", r["slug"], size / 1e6, n, rel)
 
+        log.info("download: %d files, keeping %s", len(rows), " ".join(sorted(kept)))
         await asyncio.gather(*(one(r) for r in rows))
+        log.info("download: %d done, %d skipped, %d failed", done, skipped, len(failed))
         self.rows = self.select()  # local_path and fetched changed
         return done, skipped, failed
 
@@ -208,7 +231,7 @@ class ggpClient:
         dest = root / rel
         existed = dest.exists()  # a failed fetch must not delete what an earlier one unpacked
         part = dest.with_name(stem + ".part")
-        ok = False
+        ok, size = False, 0
         try:
             async with self.sem, self.client.stream("GET", r["url"]) as resp:
                 resp.raise_for_status()
@@ -221,11 +244,13 @@ class ggpClient:
                 with open(part, "wb") as f:  # shortcut: blocking write per 64 KB chunk, use aiofiles if it ever matters
                     async for chunk in resp.aiter_bytes(1 << 16):
                         f.write(chunk)
-            ok = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force) > 0
+                        size += len(chunk)
+            n = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force)
+            ok = n > 0
         finally:
             part.unlink(missing_ok=True)
             if not (ok or existed):
                 shutil.rmtree(dest, ignore_errors=True)
         if not ok:
             raise RuntimeError(f"no matching files in the archive (looked for {', '.join(sorted(want))})")
-        return rel
+        return rel, n, size
