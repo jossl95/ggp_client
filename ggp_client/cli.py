@@ -67,7 +67,7 @@ def main(argv=None):
     d.add_argument("--concurrency", type=positive, default=3)
     d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three)")
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
-    d.add_argument("--force", action="store_true", help="download again even if the file exists")
+    d.add_argument("--force", action="store_true", help="download and overwrite even files that already exist")
 
     a = ap.parse_args(argv)
     data = Path(a.data_dir)
@@ -99,11 +99,11 @@ def main(argv=None):
         return
 
     async def run():
-        async with ggpClient(data, a.access_url, a.concurrency, **filters(a)) as p:
+        async with ggpClient(data, a.access_url, a.concurrency, force=a.force, **filters(a)) as p:
             if not p.rows:
                 sys.exit("nothing to download (run 'ggp-client sync' first, or loosen the filters)")
             await p.login()
-            return await p.download(force=a.force, ext=a.ext, metadata=a.metadata)
+            return await p.download(ext=a.ext, metadata=a.metadata)
     try:
         done, skipped, failed = asyncio.run(run())
     except ValueError as e:  # a filter value that is not in the catalogue

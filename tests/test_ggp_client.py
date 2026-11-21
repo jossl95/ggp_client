@@ -120,8 +120,8 @@ def handler(req):
     return httpx.Response(404)
 
 
-def portal(tmp_path, url=None):
-    return ggpClient(tmp_path, url, transport=httpx.MockTransport(handler))
+def portal(tmp_path, url=None, **kw):
+    return ggpClient(tmp_path, url, transport=httpx.MockTransport(handler), **kw)
 
 
 def test_slug_and_naming():
@@ -200,6 +200,11 @@ def test_plain_file_is_kept_only_if_it_matches(tmp_path):
     assert extract.unpack_file(f, "AT.dta", tmp_path / "o2", {"sav"}, False) == 0
     assert extract.unpack_file(f, "..", tmp_path / "o3", {"dta"}, True) == 1  # unsafe name is replaced
     assert tree(tmp_path / "o3") == ["download"]
+    f.write_bytes(b"new")
+    assert extract.unpack_file(f, "AT.dta", tmp_path / "o", {"dta"}, False) == 1  # matches, but exists: kept
+    assert (tmp_path / "o/AT.dta").read_bytes() == b"d"
+    assert extract.unpack_file(f, "AT.dta", tmp_path / "o", {"dta"}, False, force=True) == 1
+    assert (tmp_path / "o/AT.dta").read_bytes() == b"new"
 
 
 def test_sync_download_select(tmp_path):
@@ -253,9 +258,9 @@ def test_sync_download_select(tmp_path):
     assert os.stat(tmp_path / ".session.json").st_mode & 0o777 == 0o600
     assert "s3cr3t" not in (tmp_path / ".session.json").read_text()
 
-    def again(**kw):  # new process: no access url, the saved session is enough
+    def again(force=False, **kw):  # new process: no access url, the saved session is enough
         async def go():
-            async with portal(tmp_path) as p:
+            async with portal(tmp_path, force=force) as p:
                 await p.login()
                 res = await p.download(root=tmp_path / "dl", **kw)
                 return res[:2]
@@ -266,11 +271,15 @@ def test_sync_download_select(tmp_path):
     assert tree(tmp_path / "dl/other/nkps") == ["other_nkps/x.dta"]
     assert again() == (0, 5)  # same request: nothing to do
     assert again(ext="dta") == (0, 5)  # a subset of what was already unpacked
-    assert again(metadata=True) == (5, 0)  # documentation was not kept yet: fetched again, added
+    (at_dir / "data/AT_w1.dta").write_bytes(b"my edits")
+    assert again(metadata=True) == (5, 0)
+    assert (at_dir / "data/AT_w1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept  # documentation was not kept yet: fetched again, added
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav", "docs/Codebook.pdf"]
     assert tree(ffs_dir) == ["ffs/waves/notes.txt", "ffs/waves/wave1/us1.dta",
                              "ffs/waves/wave1/us1.sav", "readme.txt"]
     assert again(metadata=True) == (0, 5)
+    assert again(force=True) == (5, 0)  # force: everything again, existing files overwritten
+    assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
 
 
 def test_ext_without_matches_fails_and_leaves_no_folder(tmp_path):

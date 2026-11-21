@@ -27,6 +27,7 @@ class ggpClient:
 
     project, round, wave, country, ids and all_versions are the filters of db.select;
     None means all. self.rows is refreshed after sync and download.
+    force: download and overwrite even files that already exist; by default existing files are never touched.
     """
     data_dir: str | Path = "ggp_data"
     access_url: str | None = field(default=None, repr=False)  # secret: never logged, stored or put in errors
@@ -37,6 +38,7 @@ class ggpClient:
     country: object = None
     ids: list | None = None
     all_versions: bool = False
+    force: bool = False
     transport: object = field(default=None, repr=False)
 
     def __post_init__(self):
@@ -165,13 +167,14 @@ class ggpClient:
             json.dump(cookies, f)
         os.replace(tmp, jar)
 
-    async def download(self, rows=None, root=None, force=False, ext=None, metadata=False):
+    async def download(self, rows=None, root=None, ext=None, metadata=False):
         """Download the files of `rows` (default: self.rows) and unpack them under root (default: data_dir/downloads).
 
         ext: datafile type(s) to keep (dta, sav, csv): one value, a list, or None for all three.
         metadata: also keep the non-data files (documentation, codebooks) from the archives.
         A file that was already unpacked for these options is skipped; asking for more later
-        (another ext, or metadata) downloads it again and adds to the folder.
+        (another ext, or metadata) downloads it again and adds the missing files to the folder.
+        Files that already exist are never overwritten, unless the client was made with force=True.
         Returns (done, skipped, [(slug, error)]).
         """
         rows = self.rows if rows is None else rows
@@ -183,7 +186,7 @@ class ggpClient:
 
         async def one(r):
             nonlocal done, skipped
-            if (not force and r["local_path"] and (root / r["local_path"]).exists()
+            if (not self.force and r["local_path"] and (root / r["local_path"]).exists()
                     and kept <= set((r["fetched"] or "").split())):
                 skipped += 1
                 return
@@ -218,7 +221,7 @@ class ggpClient:
                 with open(part, "wb") as f:  # shortcut: blocking write per 64 KB chunk, use aiofiles if it ever matters
                     async for chunk in resp.aiter_bytes(1 << 16):
                         f.write(chunk)
-            ok = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata) > 0
+            ok = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force) > 0
         finally:
             part.unlink(missing_ok=True)
             if not (ok or existed):

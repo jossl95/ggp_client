@@ -73,10 +73,11 @@ def _write(src, target):
     os.replace(part, target)
 
 
-def unpack(path, dest, ext, metadata, depth=0):
+def unpack(path, dest, ext, metadata, force=False, depth=0):
     """Extract the wanted members of the archive at path into dest; a nested archive becomes a folder named after it.
 
-    Folder names are lowercased, file names are kept. Returns the number of files written.
+    Folder names are lowercased, file names are kept. A file that already exists is left as it is
+    unless force. Returns the number of matching files (written or already there).
     """
     n = 0
     for parts, opener in _members(path, ext, metadata):
@@ -88,25 +89,28 @@ def unpack(path, dest, ext, metadata, depth=0):
                 inner = Path(tmp, "inner")
                 _write(src, inner)
                 if is_archive(inner):
-                    n += unpack(inner, folder / Path(fname).stem.lower(), ext, metadata, depth + 1)
+                    n += unpack(inner, folder / Path(fname).stem.lower(), ext, metadata, force, depth + 1)
                     continue
         if wanted(suffix, ext, metadata):
-            folder.mkdir(parents=True, exist_ok=True)
-            with opener() as src:
-                _write(src, folder / fname)
+            target = folder / fname
+            if force or not target.exists():
+                folder.mkdir(parents=True, exist_ok=True)
+                with opener() as src:
+                    _write(src, target)
             n += 1
     return n
 
 
-def unpack_file(path, name, dest, ext, metadata):
+def unpack_file(path, name, dest, ext, metadata, force=False):
     """Unpack a downloaded file: a zip or 7z is extracted, anything else is kept if it matches."""
     if is_archive(path):
-        return unpack(path, dest, ext, metadata)
+        return unpack(path, dest, ext, metadata, force)
     parts = _parts(name)
     fname = parts[-1] if parts else "download"
     if not wanted(_suffix(fname), ext, metadata):
         return 0
-    dest.mkdir(parents=True, exist_ok=True)
-    with open(path, "rb") as src:
-        _write(src, dest / fname)
+    if force or not (dest / fname).exists():
+        dest.mkdir(parents=True, exist_ok=True)
+        with open(path, "rb") as src:
+            _write(src, dest / fname)
     return 1

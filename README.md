@@ -67,7 +67,9 @@ are kept as they are in the archive. The archive itself is not kept. Each file i
 - `--ext` (default `dta sav csv`): only datafiles of these types are kept. Data files of another type are skipped.
 - `--metadata` (default off): also keep every file that is not a datafile type (codebooks, readmes, xml, ...).
 - Asking for more later (another `--ext`, or `--metadata`) downloads the file again and adds to the folder;
-  nothing is deleted. The same or a smaller request is skipped. `--force` downloads again regardless.
+  nothing is deleted. The same or a smaller request is skipped. A file that already exists is never overwritten,
+  so your own changes to an unpacked file survive. `--force` (`ggpClient(force=True)`) downloads everything again
+  and overwrites existing files.
 - A download with no matching file is reported as failed and leaves no folder behind.
 
 ## Logging in
