@@ -97,7 +97,7 @@ V005$01  17-17
 VARIABLE LABELS
  COUNTRY  "ISO country code"
 /HHNUM    "Household identification no."
-/WEIGHT   "Caseweight"
+/WEIGHT   "Caseweight in US$"
 /V004$01  "Born in Nieder"sterreich"
 .
 VALUE LABELS
@@ -285,6 +285,10 @@ def test_sync_download_select(tmp_path):
     ffs_dir = tmp_path / "dl/ffs/us"
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav"]
     assert tree(ffs_dir) == ["ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]  # FFS: raw, no ext: no conversion
+    sps = (ffs_dir / "ffs_us_v1.0.sps").read_bytes().decode("latin-1")  # rewritten: names with _, FILE= the new .dat
+    assert sps.startswith("DATA LIST FILE='ffs_us_v1.0.dat' records=2\r\n")
+    assert "V004_01  15-16" in sps and "\r\n V005_01\r\n" in sps and '"Caseweight in US$"' in sps
+    assert "$01" not in sps
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
     assert tuple(con.execute("SELECT local_path, fetched FROM file WHERE download_id=95").fetchone()) == (
         "ggs-ii/w1/at/ggs2_w1_at_v1.1", "csv dta sav")
@@ -460,6 +464,7 @@ def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
     assert df["HHNUM"].tolist() == ["A0001", "A0002"] and df["WEIGHT"].tolist() == [0.7035, 1.2]
     assert df["V004_01"].tolist() == [1, 98] and df["V005_01"].isna().tolist() == [False, True]  # * is missing
     assert m.column_names_to_labels["V004_01"] == 'Born in Nieder"sterreich'  # the stray quote does not end it
+    assert m.column_names_to_labels["WEIGHT"] == "Caseweight in US$"
     assert m.variable_value_labels["V005_01"] == m.variable_value_labels["V004_01"] == {1: "One", 98: "Missing value"}
     assert m.variable_value_labels["COUNTRY"] == {23: "United States"}
     assert m.missing_ranges == {"V004_01": [{"lo": 98.0, "hi": 98.0}]}

@@ -6,7 +6,8 @@ with the record and columns of every variable, VARIABLE LABELS, VALUE LABELS, MI
 
     python -m ggp_client.ffs_conversion AUSTRIA.SPS --ext sav dta     # writes AUSTRIA.sav and AUSTRIA.dta
 
-Every $ in a variable name becomes _ (Stata does not allow $): IND01$01 becomes IND01_01.
+Every $ in a variable name becomes _ (Stata does not allow $): IND01$01 becomes IND01_01. Downloads also
+rewrite the raw .sps that way (see rewrite_sps), so syntax, converted files and documentation use the same names.
 Missing value codes (e.g. 98) stay in the data; sav also marks them as missing, as SPSS would.
 csv has the codes only: it cannot hold labels.
 """
@@ -252,12 +253,24 @@ def convert(folder, exts, name=CONVERTED, force=False, out_dir=None):
     return n
 
 
+def rewrite_sps(text, dat_name=None):
+    """The .sps with every $ in a variable name as _, and FILE= pointing at dat_name (the .dat next to it).
+
+    Quoted text (labels, the FILE path) is left alone, so a $ in a label stays.
+    """
+    text = re.sub(r'("[^\n]*"|\'[^\n]*\')|\$', lambda m: m[1] or "_", text)
+    if dat_name:  # the original points at C:\ISSA\...\COUNTRY.DAT; the .dat is renamed on download
+        text = re.sub(r"(?i)(\bFILE\s*=\s*)(['\"])[^'\"\n]*\2", lambda m: f"{m[1]}'{dat_name}'", text, count=1)
+    return text
+
+
 def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=False):
     """Unpack an FFS download into dest, the country folder (one dataset per country: no folder of its own).
 
     Raw files are named after the dataset: AUSTRIA.DAT becomes <stem>.dat, and .sps and .tbl likewise; when the
-    archive holds several of one type (Estonia) the original name is added: <stem>_est_f.dat. Documents
-    (metadata) keep their names. With convert_to the data is also saved as converted_data.<ext>.
+    archive holds several of one type (Estonia) the original name is added: <stem>_est_f.dat. The .sps is
+    rewritten: $ in names becomes _, FILE= names the renamed .dat. Documents (metadata) keep their names.
+    With convert_to the data is also saved as converted_data.<ext>.
     Existing files are kept unless force. Returns the number of matching files.
     """
     # shortcut: two versions of one country would share converted_data.*; the portal has one per country
@@ -270,6 +283,9 @@ def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=Fa
             n += convert(tmp, convert_to, CONVERTED, force, out_dir=dest)
         files = sorted(p for p in tmp.rglob("*") if p.is_file())
         count = collections.Counter(p.suffix.lower() for p in files)
+        for sps in (p for p in files if p.suffix.lower() == ".sps"):
+            dat = f"{stem}.dat" if count[".dat"] == 1 else None  # with several .dat files: which one is unknown
+            sps.write_bytes(rewrite_sps(sps.read_bytes().decode("latin-1"), dat).encode("latin-1"))  # keeps CRLF
         for p in files:
             rel, s = p.relative_to(tmp), p.suffix.lower()
             if s in DATA_FILES:
