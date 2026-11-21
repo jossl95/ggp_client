@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+from concurrent.futures.process import BrokenProcessPool
 from pathlib import Path
 
 import polars as pl
@@ -93,45 +94,50 @@ def _part(target):
     return target.with_name(target.stem + ".part.parquet")
 
 
+def write(src, rel, target, r):
+    """One file: parquet and meta.json, written whole or not at all. The async version runs this in a process."""
+    part = _part(target)
+    try:
+        plan(src, r, rel).sink_parquet(part)
+        save_meta(src, target, rel)
+        os.replace(part, target)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        target.with_suffix(".meta.part.json").unlink(missing_ok=True)
+        raise
+
+
 def preprocess(rows, root, out, force=False):
     """Write the parquet files one after the other. Returns (done, skipped, [(file, error)])."""
     todo, skipped = jobs(rows, root, out, force)
     failed = []
     for src, rel, target, r in todo:
         try:
-            part = _part(target)
-            plan(src, r, rel).sink_parquet(part)
-            save_meta(src, target, rel)
-            os.replace(part, target)  # written whole or not at all
+            write(src, rel, target, r)
             log.info("preprocessed %s", target.relative_to(out))
         except Exception as e:  # one bad file must not stop the rest
-            _part(target).unlink(missing_ok=True)
-            target.with_suffix(".meta.part.json").unlink(missing_ok=True)
             failed.append((str(rel), str(e) or type(e).__name__))
             log.error("preprocess failed %s: %s", *failed[-1])
     return len(todo) - len(failed), skipped, failed
 
 
 async def preprocess_async(rows, root, out, force=False, concurrency=4):
-    """preprocess(), `concurrency` files at a time: dta/sav/sps are read in threads, polars writes on its own."""
+    """preprocess(), `concurrency` files at a time, each in its own process (read, then polars sinks it lazily)."""
     todo, skipped = jobs(rows, root, out, force)
-    sem = asyncio.Semaphore(concurrency)  # dta and sav are read whole: this bounds the memory used
-    failed = []
+    loop, failed = asyncio.get_running_loop(), []
 
     async def one(src, rel, target, r):
-        async with sem:
-            try:
-                part = _part(target)
-                lf = await asyncio.to_thread(plan, src, r, rel)
-                await lf.sink_parquet(part, lazy=True).collect_async()
-                await asyncio.to_thread(save_meta, src, target, rel)
-                os.replace(part, target)
-                log.info("preprocessed %s", target.relative_to(out))
-            except Exception as e:
-                _part(target).unlink(missing_ok=True)
-                target.with_suffix(".meta.part.json").unlink(missing_ok=True)
-                failed.append((str(rel), str(e) or type(e).__name__))
-                log.error("preprocess failed %s: %s", *failed[-1])
+        try:
+            await loop.run_in_executor(ex, write, src, rel, target, dict(r))  # a sqlite3.Row cannot go to a process
+            log.info("preprocessed %s", target.relative_to(out))
+        except BrokenProcessPool:
+            failed.append((str(rel), "a worker process died: out of memory (lower concurrency), or a script "
+                                      "without `if __name__ == \"__main__\":`"))
+            log.error("preprocess failed %s: %s", *failed[-1])
+        except Exception as e:  # the worker's log lines would not reach this log: log here
+            failed.append((str(rel), str(e) or type(e).__name__))
+            log.error("preprocess failed %s: %s", *failed[-1])
 
-    await asyncio.gather(*(one(*j) for j in todo))
+    with read.pool(concurrency) as ex:  # also bounds memory: dta and sav are read whole
+        await asyncio.gather(*(one(*j) for j in todo))
     return len(todo) - len(failed), skipped, failed

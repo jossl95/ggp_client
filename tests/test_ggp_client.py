@@ -542,6 +542,8 @@ def test_read_preprocess_and_consolidate(tmp_path):
                  local_path=str(d.relative_to(root).parent if cc == "AT" else d.relative_to(root)))
             for cc, d in [("AT", at), ("NL", nl)]] + [dict(local_path=None)]  # not downloaded: ignored
     assert [p.name for p in preprocess.datafiles(at)] == ["AT.dta"] and read.read(at / "AT.sav")["age"][0] == 99
+    got = asyncio.run(read.read_all_async([at / "AT.dta", nl / "NL.csv", at / "AT.sav"], 2))  # processes + polars
+    assert [d["age"].to_list() for d in got] == [[30, 40], ["n/a"], [99]]
 
     assert preprocess.preprocess(rows[:1], root, pre) == (1, 0, [])
     assert asyncio.run(preprocess.preprocess_async(rows, root, pre)) == (1, 1, [])  # AT is already there

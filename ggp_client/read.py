@@ -3,11 +3,14 @@
     df = read("GGSII_Wave1_AT_V_1_1.dta")          # polars DataFrame
     lf = scan("GGSII_Wave1_AT_V_1_1.parquet")      # polars LazyFrame
     df = await read_async("GGSII_Wave1_AT_V_1_1.sav")
+    dfs = await read_all_async([...], concurrency=4)   # several files at once
     m = meta("GGSII_Wave1_AT_V_1_1.dta")           # variable and value labels (dta and sav)
 
 Values are the codes; value labels are not applied. In .sav, values SPSS marks as missing are null.
 """
 import asyncio
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import polars as pl
@@ -61,11 +64,26 @@ def read(path):
     raise ValueError(f"{p.name}: cannot read {s or 'files without a type'}; choose from {', '.join(FORMATS)}")
 
 
+def pool(workers):
+    """Processes for dta, sav and sps: pyreadstat holds the GIL, so threads would read them one at a time.
+
+    spawn, not fork: a forked polars can deadlock. A script using this needs `if __name__ == "__main__":`.
+    """
+    return ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"))
+
+
+async def read_all_async(paths, concurrency=4):
+    """[read(p) for p in paths], concurrently: parquet and csv on polars' async engine, the others in
+    `concurrency` processes."""
+    loop = asyncio.get_running_loop()
+    with pool(concurrency) as ex:  # processes start only when a dta/sav/sps comes along
+        return await asyncio.gather(*(scan(p).collect_async() if Path(p).suffix.lower() in LAZY
+                                      else loop.run_in_executor(ex, read, p) for p in paths))
+
+
 async def read_async(path):
-    """read(), without blocking the event loop: polars collects parquet and csv on its own threads."""
-    if Path(path).suffix.lower() in LAZY:
-        return await scan(path).collect_async()
-    return await asyncio.to_thread(read, path)
+    """read(), without blocking the event loop."""
+    return (await read_all_async([path], 1))[0]
 
 
 def meta(path):

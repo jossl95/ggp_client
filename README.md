@@ -135,6 +135,7 @@ from ggp_client import read
 df = read.read("data/raw/downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/ggsii_wave1_at_v_1_1/GGSII_Wave1_AT_V_1_1.dta")
 lf = read.scan("....parquet")              # LazyFrame: parquet and csv are scanned, dta/sav/sps read first
 df = await read.read_async("....sav")      # does not block the event loop
+dfs = await read.read_all_async(paths, concurrency=4)  # several at once: dta/sav/sps in processes
 ```
 
 **Preprocessing** saves every downloaded data file of the selected rows as parquet in `data/processed/download`, at
@@ -160,12 +161,16 @@ question, 14), `cweight_1801` (the Dutch weight, 18). The number is looked up in
 For all GGS that leaves out 2,946 variables of 39 files (GGS-II wave 1 goes from 5,642 to 4,001 columns); the
 per-country files in `processed/download` keep them, and the log says how many were left out of which file.
 
-Both keep existing files unless `force`. From the client they run concurrently (async); the modules also have plain
-functions:
+Both keep existing files unless `force`. Everything has a plain version and an async, concurrent one; the client
+uses the async ones. Reading dta, sav and sps runs in worker processes, because pyreadstat holds Python's GIL
+(threads read 8 GGS-II files in 10.3 s, the same as one by one; 4 processes in 4.9 s). Parquet, csv and
+consolidation run on polars' own lazy, multi-threaded engine. The workers are started with `spawn`, so a script
+that calls the async versions needs the usual `if __name__ == "__main__":` guard (the command line, notebooks and
+`download_ggs.py` are fine).
 
 ```python
 async with ggpClient(project="ggs", concurrency=4) as p:
-    await p.preprocess()          # 4 files at a time; dta/sav in threads, polars writes lazily (sink_parquet)
+    await p.preprocess()          # 4 files at a time, each in a worker process: read, then polars sinks it lazily
     await p.consolidate()         # all groups in one lazy polars run (collect_all_async)
 
 from ggp_client import consolidate, preprocess   # without asyncio, one at a time
@@ -173,8 +178,8 @@ preprocess.preprocess(p.rows, "data/raw/downloads", "data/processed/download")
 consolidate.consolidate(p.rows, "data/raw/downloads", "data/processed/download", "data/consolidated")
 ```
 
-All GGS (69 files, 0.5 GB download) took 2 minutes to preprocess (133 MB of parquet) and 12 seconds to consolidate
-into 10 files, for example GGS-II wave 1: 185,660 rows of 20 countries, 4,001 columns.
+All GGS (69 files, 0.5 GB download) on 4 cores: preprocessing took 28 seconds async (94 one by one), consolidating
+9 seconds (10), into 10 files, for example GGS-II wave 1: 185,660 rows of 20 countries, 4,001 columns.
 
 ## Logging
 

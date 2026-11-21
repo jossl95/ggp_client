@@ -103,7 +103,8 @@ async def consolidate_async(rows, root, pre, out, force=False):
     out = Path(out)
     names = list(todo)
     try:
-        await pl.collect_all_async([plan(todo[n]).sink_parquet(out / f"{n}.part.parquet", lazy=True) for n in names])
+        plans = await asyncio.to_thread(lambda: [plan(todo[n]) for n in names])  # reads every file's schema
+        await pl.collect_all_async([p.sink_parquet(out / f"{n}.part.parquet", lazy=True) for p, n in zip(plans, names)])
     except Exception:  # find which group failed: run them one by one
         for n in names:
             (out / f"{n}.part.parquet").unlink(missing_ok=True)
