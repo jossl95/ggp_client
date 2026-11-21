@@ -269,7 +269,8 @@ def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=Fa
 
     Raw files are named after the dataset: AUSTRIA.DAT becomes <stem>.dat, and .sps and .tbl likewise; when the
     archive holds several of one type (Estonia) the original name is added: <stem>_est_f.dat. The .sps is
-    rewritten: $ in names becomes _, FILE= names the renamed .dat. Documents (metadata) keep their names.
+    rewritten: $ in names becomes _, FILE= names the renamed .dat; in the .tbl a $ inside a name (IND01$01)
+    becomes _ too. Documents (metadata) keep their names.
     With convert_to the data is also saved as converted_data.<ext>.
     Existing files are kept unless force. Returns the number of matching files.
     """
@@ -286,6 +287,8 @@ def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=Fa
         for sps in (p for p in files if p.suffix.lower() == ".sps"):
             dat = f"{stem}.dat" if count[".dat"] == 1 else None  # with several .dat files: which one is unknown
             sps.write_bytes(rewrite_sps(sps.read_bytes().decode("latin-1"), dat).encode("latin-1"))  # keeps CRLF
+        for tbl in (p for p in files if p.suffix.lower() == ".tbl"):  # report text: only a $ between name characters
+            tbl.write_bytes(re.sub(rb"(?<=[A-Za-z0-9])\$(?=[A-Za-z0-9])", b"_", tbl.read_bytes()))
         for p in files:
             rel, s = p.relative_to(tmp), p.suffix.lower()
             if s in DATA_FILES:

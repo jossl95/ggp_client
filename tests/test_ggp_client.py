@@ -118,7 +118,7 @@ FFS_DAT = "\r\n".join([
     "23      000101" + "23" + "A0001" + "0.7035", "23      000102" + " 1" + "1",
     "23      000201" + "23" + "A0002" + "1.2000", "23      000202" + "98" + "*",
 ]).encode()
-FFS_ZIP = make_zip({"USA2.DAT": FFS_DAT, "USA2.SPS": FFS_SPS, "USA.TBL": b"tables", "Docs/readme.txt": b"r"})
+FFS_ZIP = make_zip({"USA2.DAT": FFS_DAT, "USA2.SPS": FFS_SPS, "USA.TBL": b"TABLE 4 BY IND01$01\r\nincome US$ 100\r\n", "Docs/readme.txt": b"r"})
 
 
 def make_7z(members):
@@ -289,6 +289,7 @@ def test_sync_download_select(tmp_path):
     assert sps.startswith("DATA LIST FILE='ffs_us_v1.0.dat' records=2\r\n")
     assert "V004_01  15-16" in sps and "\r\n V005_01\r\n" in sps and '"Caseweight in US$"' in sps
     assert "$01" not in sps
+    assert (ffs_dir / "ffs_us_v1.0.tbl").read_bytes() == b"TABLE 4 BY IND01_01\r\nincome US$ 100\r\n"  # names only
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
     assert tuple(con.execute("SELECT local_path, fetched FROM file WHERE download_id=95").fetchone()) == (
         "ggs-ii/w1/at/ggs2_w1_at_v1.1", "csv dta sav")

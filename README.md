@@ -94,9 +94,9 @@ Estonia has two samples (and a total), so its names get the sample added: `ffs_e
 From Python: `await p.download(ext=["sav"])`. A single dataset: `python -m ggp_client.ffs_conversion AUSTRIA.SPS --ext dta`.
 
 Conversion replaces every `$` in every variable name with `_` (Stata does not allow `$`), in all three formats:
-`IND01$01` is `IND01_01`, `V004$12` is `V004_12`. Other names are unchanged. The raw `.sps` is rewritten the same
-way on download (a `$` inside a quoted label stays), so syntax and converted files use the same names; only
-Estonia's raw `.sav` files keep the original names.
+`IND01$01` is `IND01_01`, `V004$12` is `V004_12`. Other names are unchanged. The raw `.sps` and `.tbl` are rewritten the
+same way on download (a `$` inside a quoted label, or one not inside a name such as `US$ 100`, stays), so syntax,
+tables and converted files use the same names; only Estonia's raw `.sav` files keep the original names.
 Missing-value codes such as 98 stay in the data, are labelled, and in `.sav` are marked missing as SPSS would.
 A cell that is not a number (the files use `*` for overflow) is read as missing, as SPSS does, and logged.
 `.csv` has the codes only.
