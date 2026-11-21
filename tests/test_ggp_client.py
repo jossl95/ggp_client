@@ -6,6 +6,7 @@ import os
 import zipfile
 
 import httpx
+import py7zr
 import pytest
 
 from ggp_client import db, extract, parse
@@ -61,7 +62,7 @@ def row(label, did):
 # the logged-in data access page: hidden sections, each list twice (all, then in columns), as on the live site
 HH = f"<h3>Harmonized Histories </h3><ul>{row('Part 1', 1)}{row('Part 2', 84)}</ul>"
 EXTRA = f"<h3>NKPS</h3><ul>{row('NKPS', 61)}</ul>"
-FORM = f"""<h1>Data Access</h1><button>Logout</button>
+FORM = f"""<h1>Data Access</h1><form action="/form/admin/logout/?next=/form/"><button>Logout</button></form>
 <section><h2>Generations and Gender Survey - Round 2 (GGS-II)</h2><h3>Austria</h3><ul>{row('Wave 1', 95)}</ul></section>
 <section x-data="{{ open: false }}"><h2>Harmonized Histories</h2><button>Show 2 datasets</button>
  <div x-show="open"><div>{HH}</div><div>{HH}</div></div></section>
@@ -84,6 +85,14 @@ FFS_ZIP = make_zip({
     "FFS/Waves.zip": make_zip({"Wave1/us1.dta": b"dta", "Wave1/us1.sav": b"sav", "notes.txt": b"n"}),
     "readme.txt": b"r",
 })
+
+
+def make_7z(members):
+    buf = io.BytesIO()
+    with py7zr.SevenZipFile(buf, "w") as z:
+        for name, data in members.items():
+            z.writestr(data, name)
+    return buf.getvalue()
 
 
 def tree(d):
@@ -161,11 +170,26 @@ def test_unpack_filters_mirrors_nested_zips_and_stays_inside(tmp_path):
         ("d", {"dta", "csv"}, False, ["a/sub/y.csv", "a/x.dta"]),  # nested zip becomes a lowercase folder
         ("m", {"dta"}, True, ["a/README", "a/sub/doc.pdf", "a/x.dta"]),  # metadata: non-data files too
     ]:
-        with zipfile.ZipFile(io.BytesIO(z)) as zf:
-            assert extract.unpack(zf, tmp_path / name, ext, meta) == len(expected)
+        (tmp_path / "in.zip").write_bytes(z)
+        assert extract.unpack(tmp_path / "in.zip", tmp_path / name, ext, meta) == len(expected)
         assert tree(tmp_path / name) == expected
     assert not (tmp_path / "evil.dta").exists()
-    assert all(p.startswith(("d/", "m/")) for p in tree(tmp_path))  # nothing escaped
+    assert all(p.startswith(("d/", "m/", "in.zip")) for p in tree(tmp_path))  # nothing escaped
+
+
+def test_7z_archives_like_the_portal_serves(tmp_path):
+    # a 7z with a datafile, a document and a nested zip; and a 7z inside a zip
+    seven = make_7z({"Data/AT.dta": b"1", "Docs/cb.pdf": b"2", "More.zip": make_zip({"y.sav": b"3"})})
+    f = tmp_path / "dl.part"
+    f.write_bytes(seven)
+    assert extract.unpack_file(f, "GGS_Wave1_Austria_V.4.4.7z", tmp_path / "a", {"dta", "sav"}, False) == 2
+    assert tree(tmp_path / "a") == ["data/AT.dta", "more/y.sav"]
+    f.write_bytes(make_zip({"Inner.7z": seven}))
+    assert extract.unpack_file(f, "x.zip", tmp_path / "b", {"dta"}, True) == 2
+    assert tree(tmp_path / "b") == ["inner/data/AT.dta", "inner/docs/cb.pdf"]
+    f.write_bytes(make_zip({"Wrong.7z": make_zip({"z.dta": b"4"})}))  # named .7z, really a zip
+    assert extract.unpack_file(f, "x.7z", tmp_path / "c", {"dta"}, False) == 1
+    assert not list(tmp_path.rglob("*.part.*")) and not list((tmp_path / "a").rglob("*.part"))
 
 
 def test_plain_file_is_kept_only_if_it_matches(tmp_path):

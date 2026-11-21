@@ -58,10 +58,11 @@ Everything lives in `--data-dir` (default `ggp_data/`):
 
 ## Unpacking
 
-Each download is a zip. Its contents are unpacked into that folder, keeping the structure inside the zip.
-A zip inside the zip becomes a folder named after it, to any depth, for example
-`ggs2_w1_at_v1.1/data/stata.zip` becomes `ggs2_w1_at_v1.1/data/stata/`. Folder names are lowercased, file names
-are kept as they are in the archive. The zip itself is not kept.
+Most downloads are zip files; most GGS-I wave 1 files, the Harmonized Histories and several Additional Datasets
+are 7z. The file contents decide, not the name (some `.7z` downloads are zips). Their contents are unpacked into that
+folder, keeping the structure inside the archive. An archive inside the archive becomes a folder named after it,
+for example `ggs2_w1_at_v1.1/data/stata.zip` becomes `ggs2_w1_at_v1.1/data/stata/`. Folder names are lowercased, file names
+are kept as they are in the archive. The archive itself is not kept. Each file is written under a temporary name and renamed when complete.
 
 - `--ext` (default `dta sav csv`): only datafiles of these types are kept. Data files of another type are skipped.
 - `--metadata` (default off): also keep every file that is not a datafile type (codebooks, readmes, xml, ...).

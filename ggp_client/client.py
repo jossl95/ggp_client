@@ -2,17 +2,19 @@
 import asyncio
 import getpass
 import json
+import logging
 import os
 import re
 import shutil
 from dataclasses import dataclass, field
+from email.message import Message
 from pathlib import Path
 
 import httpx
 
 from . import db, extract, parse
 
-DISPOSITION = re.compile(r'''filename\*?=(?:UTF-8'')?"?([^";]+)''', re.I)
+logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print request URLs: the access link is one
 
 
 class LoginError(RuntimeError):
@@ -120,7 +122,7 @@ class ggpClient:
         return found, failed
 
     async def _logged_in(self):
-        return "secure login link" not in await self._text("/form/")
+        return "/logout/" in await self._text("/form/")  # only a logged-in page has the logout form
 
     async def login(self):
         """Reuse the saved session if it still works, else log in with the access link.
@@ -209,12 +211,14 @@ class ggpClient:
                 resp.raise_for_status()
                 if "text/html" in resp.headers.get("content-type", ""):
                     raise RuntimeError("got a web page instead of a file (no access to this dataset yet?)")
-                m = DISPOSITION.search(resp.headers.get("content-disposition", ""))
+                disposition = Message()  # parses filename*=UTF-8''... and quoting, as mail headers do
+                disposition["content-disposition"] = resp.headers.get("content-disposition", "")
+                name = disposition.get_filename() or stem
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with open(part, "wb") as f:  # shortcut: blocking write per 64 KB chunk, use aiofiles if it ever matters
                     async for chunk in resp.aiter_bytes(1 << 16):
                         f.write(chunk)
-            ok = await asyncio.to_thread(extract.unpack_file, part, m[1] if m else stem, dest, want, metadata) > 0
+            ok = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata) > 0
         finally:
             part.unlink(missing_ok=True)
             if not (ok or existed):
