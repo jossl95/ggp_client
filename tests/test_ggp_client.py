@@ -82,10 +82,42 @@ def make_zip(members):
 
 # datafiles directly in the zip, and a zip that holds another zip
 AT_ZIP = make_zip({"Data/AT_w1.dta": b"dta", "Data/AT_w1.sav": b"sav", "Docs/Codebook.pdf": b"pdf"})
-FFS_ZIP = make_zip({
-    "FFS/Waves.zip": make_zip({"Wave1/us1.dta": b"dta", "Wave1/us1.sav": b"sav", "notes.txt": b"n"}),
-    "readme.txt": b"r",
-})
+# an FFS dataset as the portal ships it, with the quirks of the real files: CRLF lines, a text column (A),
+# a stray quote where an umlaut was, * for overflow, $ in names, labels shared by two variables
+FFS_SPS = """DATA LIST FILE='C:\\ISSA\\SURVEY\\USA\\SPS\\USA2.DAT' records=2
+/1
+COUNTRY  15-16
+HHNUM    17-21(A)
+WEIGHT   22-27
+/2
+V004$01  15-16
+V005$01  17-17
+.
+VARIABLE LABELS
+ COUNTRY  "ISO country code"
+/HHNUM    "Household identification no."
+/WEIGHT   "Caseweight"
+/V004$01  "Born in Nieder"sterreich"
+.
+VALUE LABELS
+ COUNTRY
+    23 "United States"
+/V004$01
+ V005$01
+     1 "One"
+    98 "Missing value"
+.
+MISSING VALUE
+ V004$01  (98)
+.
+EXECUTE
+.
+""".replace("\n", "\r\n").encode()
+FFS_DAT = "\r\n".join([
+    "23      000101" + "23" + "A0001" + "0.7035", "23      000102" + " 1" + "1",
+    "23      000201" + "23" + "A0002" + "1.2000", "23      000202" + "98" + "*",
+]).encode()
+FFS_ZIP = make_zip({"USA2.DAT": FFS_DAT, "USA2.SPS": FFS_SPS, "USA.TBL": b"tables", "Docs/readme.txt": b"r"})
 
 
 def make_7z(members):
@@ -251,7 +283,7 @@ def test_sync_download_select(tmp_path):
     at_dir = tmp_path / "dl/ggs-ii/w1/at/ggs2_w1_at_v1.1"
     ffs_dir = tmp_path / "dl/ffs/us/ffs_us_v1.0"
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav"]
-    assert tree(ffs_dir) == ["ffs/waves/wave1/us1.dta", "ffs/waves/wave1/us1.sav"]
+    assert tree(ffs_dir) == ["USA.TBL", "USA2.DAT", "USA2.SPS"]  # FFS: the raw files, no ext so no conversion
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
     assert tuple(con.execute("SELECT local_path, fetched FROM file WHERE download_id=95").fetchone()) == (
         "ggs-ii/w1/at/ggs2_w1_at_v1.1", "csv dta sav")
@@ -271,13 +303,14 @@ def test_sync_download_select(tmp_path):
         "hh_harmonized-histories_1/x.dta", "hh_harmonized-histories_84/x.dta"]  # two files: a folder each
     assert tree(tmp_path / "dl/other/nkps") == ["other_nkps/x.dta"]
     assert again() == (0, 5)  # same request: nothing to do
-    assert again(ext="dta") == (0, 5)  # a subset of what was already unpacked
+    assert again(ext="dta") == (1, 4)  # a subset for the others; FFS is converted now that an ext is given
+    assert tree(ffs_dir) == ["USA.TBL", "USA2.DAT", "USA2.SPS", "ffs_us_v1.0.dta"]
+    assert again(ext="dta") == (0, 5)
     (at_dir / "data/AT_w1.dta").write_bytes(b"my edits")
     assert again(metadata=True) == (5, 0)
-    assert (at_dir / "data/AT_w1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept  # documentation was not kept yet: fetched again, added
+    assert (at_dir / "data/AT_w1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav", "docs/Codebook.pdf"]
-    assert tree(ffs_dir) == ["ffs/waves/notes.txt", "ffs/waves/wave1/us1.dta",
-                             "ffs/waves/wave1/us1.sav", "readme.txt"]
+    assert tree(ffs_dir) == ["USA.TBL", "USA2.DAT", "USA2.SPS", "docs/readme.txt", "ffs_us_v1.0.dta"]
     assert again(metadata=True) == (0, 5)
     assert again(force=True) == (5, 0)  # force: everything again, existing files overwritten
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
@@ -408,3 +441,28 @@ def test_client_holds_con_and_filtered_rows(tmp_path):
             return [r["slug"] for r in p.rows]
     assert asyncio.run(go()) == ["ggs2-at-wave1", "ggs2-nl-wave1"]  # refreshed by sync, filters applied
     assert ggpClient.__dataclass_fields__["data_dir"].default == "ggp_data"
+
+
+def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
+    from ggp_client import ffs_conversion
+    import pyreadstat
+    (tmp_path / "USA2.SPS").write_bytes(FFS_SPS)
+    (tmp_path / "USA2.DAT").write_bytes(FFS_DAT)
+    assert ffs_conversion.convert(tmp_path, ["sav", "dta", "csv"], "ffs_us_v1.0") == 3
+    df, m = pyreadstat.read_sav(tmp_path / "ffs_us_v1.0.sav", user_missing=True)
+    assert list(df.columns) == ["COUNTRY", "HHNUM", "WEIGHT", "V004_01", "V005_01"]  # $ is not allowed in Stata
+    assert df["HHNUM"].tolist() == ["A0001", "A0002"] and df["WEIGHT"].tolist() == [0.7035, 1.2]
+    assert df["V004_01"].tolist() == [1, 98] and df["V005_01"].isna().tolist() == [False, True]  # * is missing
+    assert m.column_names_to_labels["V004_01"] == 'Born in Nieder"sterreich'  # the stray quote does not end it
+    assert m.variable_value_labels["V005_01"] == m.variable_value_labels["V004_01"] == {1: "One", 98: "Missing value"}
+    assert m.variable_value_labels["COUNTRY"] == {23: "United States"}
+    assert m.missing_ranges == {"V004_01": [{"lo": 98.0, "hi": 98.0}]}
+    dta, md = pyreadstat.read_dta(tmp_path / "ffs_us_v1.0.dta")
+    assert md.variable_value_labels["V004_01"] == {1: "One", 98: "Missing value"}
+    assert md.column_names_to_labels["COUNTRY"] == "ISO country code"
+    assert (tmp_path / "ffs_us_v1.0.csv").read_text().splitlines()[0] == "COUNTRY,HHNUM,WEIGHT,V004_01,V005_01"
+    (tmp_path / "ffs_us_v1.0.csv").write_text("mine")
+    assert ffs_conversion.convert(tmp_path, ["csv"], "ffs_us_v1.0") == 1  # exists: kept
+    assert (tmp_path / "ffs_us_v1.0.csv").read_text() == "mine"
+    ffs_conversion.convert(tmp_path, ["csv"], "ffs_us_v1.0", force=True)
+    assert (tmp_path / "ffs_us_v1.0.csv").read_text() != "mine"

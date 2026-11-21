@@ -66,7 +66,8 @@ def main(argv=None):
     add_filters(d)
     add_access_url(d)
     d.add_argument("--concurrency", type=positive, default=3)
-    d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three)")
+    d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three); "
+                                                         "FFS data is converted to these only when given")
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
     d.add_argument("--force", action="store_true", help="download and overwrite even files that already exist")
 
