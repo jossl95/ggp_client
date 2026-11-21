@@ -11,16 +11,23 @@ Missing value codes (e.g. 98) stay in the data; sav also marks them as missing, 
 csv has the codes only: it cannot hold labels.
 """
 import argparse
+import collections
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 
 import pandas as pd
 import pyreadstat
 
+from . import extract
+
 log = logging.getLogger("ggp_client")
 FORMATS = ("sav", "dta", "csv")
+CONVERTED = "converted_data"
+RAW = {"dat", "sps", "tbl", "sav"}  # always kept; .sav because Estonia ships those instead of a .sps
+DATA_FILES = {".dat", ".sps", ".tbl", ".sav", ".dta", ".csv"}  # renamed after the dataset; documents keep their names
 SECTION = re.compile(r"^(DATA LIST|VARIABLE LABELS?|VALUE LABELS?|MISSING VALUES?)\b(.*)$", re.I)
 # a label runs to the last quote on its line: some files have stray quotes where umlauts were ("Nieder"sterreich")
 TOKEN = re.compile(r'"[^\n]*"|\'[^\n]*\'|\([^)]*\)|/|[^\s/()"\']+')
@@ -203,14 +210,15 @@ def write(df, meta, target, force=False):
     return True
 
 
-def convert(folder, exts, stem, force=False):
-    """Convert every FFS dataset unpacked in folder to `exts`, saved in folder as <stem>.<ext>.
+def convert(folder, exts, name=CONVERTED, force=False, out_dir=None):
+    """Convert every FFS dataset unpacked in folder to `exts`, saved in out_dir (default: folder) as <name>.<ext>.
 
     A dataset is a .sps with the .dat of the same name (or the only .dat next to it). A country shipped
     without .sps but with .sav files (Estonia) is converted from those. Several datasets in one folder
-    get the source name added: <stem>_<name>.<ext>. Returns the number of matching output files.
+    get the source name added: <name>_<source>.<ext>. Returns the number of matching output files.
     """
     folder = Path(folder)
+    out = Path(out_dir or folder)
     files = sorted(p for p in folder.rglob("*") if p.is_file() and ".part" not in p.name)
     by_suffix = lambda s: [p for p in files if p.suffix.lower() == s]
     sources = []
@@ -233,14 +241,43 @@ def convert(folder, exts, stem, force=False):
         raise ValueError("no .sps (or .sav) to convert")
     n = 0
     for src, read in sources:
-        name = stem if len(sources) == 1 else f"{stem}_{src.stem.lower()}"
-        targets = [folder / f"{name}.{e}" for e in exts]
+        base = name if len(sources) == 1 else f"{name}_{src.stem.lower()}"
+        targets = [out / f"{base}.{e}" for e in exts]
         todo = [t for t in targets if force or not t.exists()]
         if todo:
             df, meta = read()
             for t in todo:
                 write(df, meta, t, force)
         n += len(targets)
+    return n
+
+
+def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=False):
+    """Unpack an FFS download into dest, the country folder (one dataset per country: no folder of its own).
+
+    Raw files are named after the dataset: AUSTRIA.DAT becomes <stem>.dat, and .sps and .tbl likewise; when the
+    archive holds several of one type (Estonia) the original name is added: <stem>_est_f.dat. Documents
+    (metadata) keep their names. With convert_to the data is also saved as converted_data.<ext>.
+    Existing files are kept unless force. Returns the number of matching files.
+    """
+    # shortcut: two versions of one country would share converted_data.*; the portal has one per country
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".unpack-") as tmp:
+        tmp = Path(tmp)
+        n = extract.unpack_file(archive, filename, tmp, set(ext) | RAW, metadata, force=True)
+        if n and convert_to:
+            n += convert(tmp, convert_to, CONVERTED, force, out_dir=dest)
+        files = sorted(p for p in tmp.rglob("*") if p.is_file())
+        count = collections.Counter(p.suffix.lower() for p in files)
+        for p in files:
+            rel, s = p.relative_to(tmp), p.suffix.lower()
+            if s in DATA_FILES:
+                rel = rel.with_name(f"{stem}{s}" if count[s] == 1 else f"{stem}_{p.stem.lower()}{s}")
+            target = dest / rel
+            if force or not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(p, target)
     return n
 
 

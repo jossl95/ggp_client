@@ -52,7 +52,7 @@ Everything lives in `--data-dir` (default `ggp_data/`):
   folder, what was unpacked). Ids are assigned once and never change.
 - `downloads/<series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/`, all lowercase, one folder per downloaded file,
   for example `downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/`. FFS has no wave level: `ffs/us/ffs_us_v1.0/`.
-  Harmonized Histories and Additional Datasets: `hh/harmonized-histories/hh_harmonized-histories_<id>/`
+  FFS has no folder per dataset: `ffs/at/ffs_at.dat`, see "FFS data". Harmonized Histories and Additional Datasets: `hh/harmonized-histories/hh_harmonized-histories_<id>/`
   (one folder per part), `other/nkps/other_nkps/`.
 - `.session.json`: your login session (mode 600), so the access link is used once, not on every run.
 - `ggp_client.log`: every sync and download with a time stamp: logins, each file downloaded (size, files kept,
@@ -70,9 +70,19 @@ Every Family and Fertility Survey archive holds three files:
 
 Exceptions: Estonia ships ready-made `.SAV` files instead of a `.SPS`, Greece has no `.TBL` and its `.SPS` has no labels.
 
-`ggp-client download --project ffs` keeps these raw files. Give `--ext` and they are also converted, with
-variable and value labels, to `downloads/ffs/<cc>/<folder>/<folder>.<ext>`, for example
-`ggp-client download --project ffs --country at --ext sav dta` writes `ffs/at/ffs_at/ffs_at.sav` and `.dta`.
+FFS has one dataset per country, so it has no folder of its own: the raw files are renamed after the dataset,
+and with `--ext` the data is also converted, with variable and value labels, to `converted_data.<ext>`:
+
+```
+downloads/ffs/at/ffs_at.dat           ggp-client download --project ffs --country at
+downloads/ffs/at/ffs_at.sps
+downloads/ffs/at/ffs_at.tbl
+downloads/ffs/at/converted_data.sav   ... --ext sav dta
+downloads/ffs/at/converted_data.dta
+```
+
+Estonia has two samples (and a total), so its names get the sample added: `ffs_ee_est_f.dat`,
+`converted_data_est_f.sav`, ...
 From Python: `await p.download(ext=["sav"])`. A single dataset: `python -m ggp_client.ffs_conversion AUSTRIA.SPS --ext dta`.
 
 Conversion keeps the SPSS variable names, except that `$` (not allowed in Stata) becomes `_`: `IND01$01` is `IND01_01`.
@@ -88,7 +98,7 @@ applies the labels and missing values.
 
 ```r
 library(haven)
-ffs <- read_sav("ggp_data/downloads/ffs/at/ffs_at/ffs_at.sav", user_na = TRUE)  # keep 98 etc. as labelled missing
+ffs <- read_sav("ggp_data/downloads/ffs/at/converted_data.sav", user_na = TRUE)  # keep 98 etc. as labelled missing
 table(as_factor(ffs$RESID))                                                     # value labels as factor levels
 attr(ffs$V917, "label")                                                         # "Religion respondent"
 ```

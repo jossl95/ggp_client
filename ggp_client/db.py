@@ -71,10 +71,9 @@ def upsert(con, slug, d):
 
 
 def mark_downloaded(con, download_id, rel_path, kept):
-    """Record the folder and add `kept` (datafile types, "meta") to what this file has been unpacked for."""
-    old = con.execute("SELECT fetched FROM file WHERE download_id=?", (download_id,)).fetchone()[0] or ""
+    """Record the folder and what is in it: `kept` (datafile types, "raw", "meta")."""
     con.execute("UPDATE file SET local_path=?, fetched=?, downloaded_at=? WHERE download_id=?",
-                (rel_path, " ".join(sorted(set(old.split()) | set(kept))), _now(), download_id))
+                (rel_path, " ".join(sorted(set(kept))), _now(), download_id))
     con.commit()
 
 

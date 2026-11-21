@@ -17,7 +17,6 @@ from . import db, extract, ffs_conversion, parse
 logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print request URLs: the access link is one
 log = logging.getLogger("ggp_client")  # never log access_url: it works as a password
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
-FFS_RAW = {"dat", "sps", "tbl"}  # an FFS dataset: fixed-width data, SPSS syntax describing it, published tables
 
 
 class LoginError(RuntimeError):
@@ -193,8 +192,8 @@ class ggpClient:
         A file that was already unpacked for these options is skipped; asking for more later
         (another ext, or metadata) downloads it again and adds the missing files to the folder.
         Files that already exist are never overwritten, unless the client was made with force=True.
-        FFS: the .dat, .sps and .tbl files are always kept; with ext given they are also converted
-        (ffs_conversion) to <folder>/<stem>.<ext>, with variable and value labels.
+        FFS: the .dat, .sps and .tbl files are always kept, as ffs/<cc>/<stem>.dat etc.; with ext given the data
+        is also converted (ffs_conversion) to ffs/<cc>/converted_data.<ext>, with variable and value labels.
         Returns (done, skipped, [(slug, error)]).
         """
         rows = self.rows if rows is None else rows
@@ -209,8 +208,9 @@ class ggpClient:
         async def one(r):
             nonlocal done, skipped
             k = ({"raw"} | set(convert) | meta) if r["project"] == "FFS" else kept
-            if (not self.force and r["local_path"] and (root / r["local_path"]).exists()
-                    and k <= set((r["fetched"] or "").split())):
+            there = bool(r["local_path"]) and (root / r["local_path"]).exists()
+            prev = set((r["fetched"] or "").split()) if there else set()  # a deleted folder holds nothing
+            if not self.force and there and k <= prev:
                 skipped += 1
                 log.info("skipped %s: already in %s", r["slug"], r["local_path"])
                 return
@@ -221,7 +221,7 @@ class ggpClient:
                 failed.append((r["slug"], str(e) or type(e).__name__))
                 log.error("failed %s: %s", r["slug"], failed[-1][1])
                 return
-            db.mark_downloaded(self.con, r["download_id"], rel, k)
+            db.mark_downloaded(self.con, r["download_id"], rel, k | (prev if rel == r["local_path"] else set()))
             done += 1
             log.info("downloaded %s: %.1f MB, %d files kept in %s", r["slug"], size / 1e6, n, rel)
 
@@ -233,7 +233,8 @@ class ggpClient:
 
     async def _fetch(self, r, root, want, metadata, convert=()):
         stem = r["stem"] + (f"_{r['download_id']}" if r["n_files"] > 1 else "")
-        rel = f"{r['rel_dir']}/{stem}"
+        ffs = r["project"] == "FFS"
+        rel = r["rel_dir"] if ffs else f"{r['rel_dir']}/{stem}"  # FFS: one dataset per country, no folder of its own
         dest = root / rel
         existed = dest.exists()  # a failed fetch must not delete what an earlier one unpacked
         part = dest.with_name(stem + ".part")
@@ -251,9 +252,11 @@ class ggpClient:
                     async for chunk in resp.aiter_bytes(1 << 16):
                         f.write(chunk)
                         size += len(chunk)
-            ffs = r["project"] == "FFS"
-            n = await asyncio.to_thread(extract.unpack_file, part, name, dest, want | FFS_RAW if ffs else want,
-                                        metadata, self.force)
+            if ffs:  # a conversion error fails this file, not the batch
+                n = await asyncio.to_thread(ffs_conversion.unpack, part, name, dest, stem, want, metadata,
+                                            convert, self.force)
+            else:
+                n = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force)
             ok = n > 0
         finally:
             part.unlink(missing_ok=True)
@@ -261,6 +264,4 @@ class ggpClient:
                 shutil.rmtree(dest, ignore_errors=True)
         if not ok:
             raise RuntimeError(f"no matching files in the archive (looked for {', '.join(sorted(want))})")
-        if ffs and convert:  # the raw files stay; a conversion error fails this file, not the batch
-            n += await asyncio.to_thread(ffs_conversion.convert, dest, convert, stem, self.force)
         return rel, n, size

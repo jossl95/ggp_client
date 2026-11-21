@@ -4,6 +4,7 @@ import asyncio
 import io
 import logging
 import os
+import shutil
 import zipfile
 
 import httpx
@@ -281,9 +282,9 @@ def test_sync_download_select(tmp_path):
     assert (done, skipped) == (5, 0)
     assert [b[0] for b in bad] == ["ggs2-nl-wave1"] and "web page" in bad[0][1]
     at_dir = tmp_path / "dl/ggs-ii/w1/at/ggs2_w1_at_v1.1"
-    ffs_dir = tmp_path / "dl/ffs/us/ffs_us_v1.0"
+    ffs_dir = tmp_path / "dl/ffs/us"
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav"]
-    assert tree(ffs_dir) == ["USA.TBL", "USA2.DAT", "USA2.SPS"]  # FFS: the raw files, no ext so no conversion
+    assert tree(ffs_dir) == ["ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]  # FFS: raw, no ext: no conversion
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
     assert tuple(con.execute("SELECT local_path, fetched FROM file WHERE download_id=95").fetchone()) == (
         "ggs-ii/w1/at/ggs2_w1_at_v1.1", "csv dta sav")
@@ -304,16 +305,21 @@ def test_sync_download_select(tmp_path):
     assert tree(tmp_path / "dl/other/nkps") == ["other_nkps/x.dta"]
     assert again() == (0, 5)  # same request: nothing to do
     assert again(ext="dta") == (1, 4)  # a subset for the others; FFS is converted now that an ext is given
-    assert tree(ffs_dir) == ["USA.TBL", "USA2.DAT", "USA2.SPS", "ffs_us_v1.0.dta"]
+    assert tree(ffs_dir) == ["converted_data.dta", "ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]
     assert again(ext="dta") == (0, 5)
     (at_dir / "data/AT_w1.dta").write_bytes(b"my edits")
     assert again(metadata=True) == (5, 0)
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav", "docs/Codebook.pdf"]
-    assert tree(ffs_dir) == ["USA.TBL", "USA2.DAT", "USA2.SPS", "docs/readme.txt", "ffs_us_v1.0.dta"]
+    assert tree(ffs_dir) == ["converted_data.dta", "docs/readme.txt", "ffs_us_v1.0.dat", "ffs_us_v1.0.sps",
+                             "ffs_us_v1.0.tbl"]
+    assert not list(ffs_dir.parent.glob(".unpack-*"))  # the temporary folder is gone
     assert again(metadata=True) == (0, 5)
     assert again(force=True) == (5, 0)  # force: everything again, existing files overwritten
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
+    shutil.rmtree(ffs_dir)  # deleted by hand: what was converted before is gone too
+    assert again() == (1, 4) and again(ext="dta") == (1, 4)
+    assert "converted_data.dta" in tree(ffs_dir)
 
     # every run is in the log next to the data, the access link never is
     text = (tmp_path / "ggp_client.log").read_text()
@@ -321,7 +327,7 @@ def test_sync_download_select(tmp_path):
     assert "INFO login: logged in with the access link" in text and "INFO login: saved session reused" in text
     assert "INFO downloaded ggs2-at-wave1: " in text and "files kept in ggs-ii/w1/at/ggs2_w1_at_v1.1" in text
     assert "ERROR failed ggs2-nl-wave1: got a web page" in text
-    assert "INFO skipped ffs-us-thefamilyandfertilitysurvey: already in ffs/us/ffs_us_v1.0" in text
+    assert "INFO skipped ffs-us-thefamilyandfertilitysurvey: already in ffs/us" in text
     assert "s3cr3t" not in text
     assert not logging.getLogger("ggp_client").handlers  # each client removes its file handler on exit
 
@@ -466,3 +472,23 @@ def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() == "mine"
     ffs_conversion.convert(tmp_path, ["csv"], "ffs_us_v1.0", force=True)
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() != "mine"
+
+
+def test_ffs_unpack_names_like_estonia(tmp_path):
+    # Estonia: two samples, ready-made .SAV instead of a .SPS, plus listings (documents)
+    from ggp_client import ffs_conversion
+    import pandas as pd
+    import pyreadstat
+    for s in ("F", "M"):
+        pyreadstat.write_sav(pd.DataFrame({"IND01$01": [1.0, 2.0]}), tmp_path / f"EST_{s}.SAV",
+                             variable_value_labels={"IND01$01": {1: "yes", 2: "no"}})
+    zf = tmp_path / "ee.zip"
+    zf.write_bytes(make_zip({**{f"EST_{s}.{e}": (tmp_path / f"EST_{s}.SAV").read_bytes() if e == "SAV" else b"x"
+                                for s in ("F", "M") for e in ("SAV", "DAT", "LST")}}))
+    dest = tmp_path / "ffs/ee"
+    n = ffs_conversion.unpack(zf, "ee.zip", dest, "ffs_ee_v1.0", {"dta"}, False, convert_to=["dta"])
+    assert n == 6 and tree(dest) == [  # 4 raw (the .LST listings are documents: only with metadata) + 2 converted
+        "converted_data_est_f.dta", "converted_data_est_m.dta", "ffs_ee_v1.0_est_f.dat", "ffs_ee_v1.0_est_f.sav",
+        "ffs_ee_v1.0_est_m.dat", "ffs_ee_v1.0_est_m.sav"]
+    df, m = pyreadstat.read_dta(dest / "converted_data_est_f.dta")
+    assert list(df.columns) == ["IND01_01"] and m.variable_value_labels["IND01_01"] == {1: "yes", 2: "no"}
