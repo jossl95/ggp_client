@@ -130,12 +130,10 @@ async def preprocess_async(rows, root, out, force=False, concurrency=4):
         try:
             await loop.run_in_executor(ex, write, src, rel, target, dict(r))  # a sqlite3.Row cannot go to a process
             log.info("preprocessed %s", target.relative_to(out))
-        except BrokenProcessPool:
-            failed.append((str(rel), "a worker process died: out of memory (lower concurrency), or a script "
-                                      "without `if __name__ == \"__main__\":`"))
-            log.error("preprocess failed %s: %s", *failed[-1])
         except Exception as e:  # the worker's log lines would not reach this log: log here
-            failed.append((str(rel), str(e) or type(e).__name__))
+            msg = ("a worker process died: out of memory (lower concurrency), or a script without "
+                   "`if __name__ == \"__main__\":`") if isinstance(e, BrokenProcessPool) else str(e) or type(e).__name__
+            failed.append((str(rel), msg))
             log.error("preprocess failed %s: %s", *failed[-1])
 
     with read.pool(concurrency) as ex:  # also bounds memory: dta and sav are read whole
