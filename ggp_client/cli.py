@@ -53,7 +53,7 @@ def show(rows):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ggp-client", description="Index and download GGP datasets.")
-    ap.add_argument("--data-dir", default="data", help="catalogue, session and log; downloads in raw/downloads, parquet in preprocessed and consolidated")
+    ap.add_argument("--data-dir", default="data", help="catalogue, session and log; downloads in raw/downloads, parquet in processed/download and consolidated")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sync", help="index all datasets (Harmonized Histories and Additional Datasets need a login)")
@@ -67,11 +67,11 @@ def main(argv=None):
     add_access_url(d)
     d.add_argument("--concurrency", type=positive, default=3)
     d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three); "
-                                                         "FFS data is converted to these (default: dta)")
+                                                         "FFS data is converted to dta and/or sav (default: dta)")
     d.add_argument("--metadata", action="store_true", help="also keep documentation and other non-data files")
     d.add_argument("--force", action="store_true", help="download and overwrite even files that already exist")
 
-    for cmd, text in [("preprocess", "save downloaded data files as parquet in <data-dir>/preprocessed"),
+    for cmd, text in [("preprocess", "save downloaded data files as parquet in <data-dir>/processed/download"),
                       ("consolidate", "stack preprocessed files per round and wave in <data-dir>/consolidated")]:
         c = sub.add_parser(cmd, help=text)
         add_filters(c)

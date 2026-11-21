@@ -282,9 +282,10 @@ def test_sync_download_select(tmp_path):
     assert (done, skipped) == (5, 0)
     assert [b[0] for b in bad] == ["ggs2-nl-wave1"] and "web page" in bad[0][1]
     at_dir = tmp_path / "dl/ggs-ii/w1/at/ggs2_w1_at_v1.1"
-    ffs_dir = tmp_path / "dl/ffs/us"
+    ffs_dir, conv_dir = tmp_path / "dl/ffs/us", tmp_path / "processed/download/ffs/us"
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav"]
-    assert tree(ffs_dir) == ["converted_data.dta", "ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]  # FFS: raw + dta
+    assert tree(ffs_dir) == ["ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]  # FFS: raw here
+    assert tree(conv_dir) == ["converted_data.dta"]  # and converted (dta by default) in processed/download
     sps = (ffs_dir / "ffs_us_v1.0.sps").read_bytes().decode("latin-1")  # rewritten: names with _, FILE= the new .dat
     assert sps.startswith("DATA LIST FILE='ffs_us_v1.0.dat' records=2\r\n")
     assert "V004_01  15-16" in sps and "\r\n V005_01\r\n" in sps and '"Caseweight in US$"' in sps
@@ -310,22 +311,21 @@ def test_sync_download_select(tmp_path):
     assert tree(tmp_path / "dl/other/nkps") == ["other_nkps/x.dta"]
     assert again() == (0, 5)  # same request: nothing to do
     assert again(ext="dta") == (0, 5)  # a subset for the others; FFS already has its dta
-    assert again(ext="csv") == (1, 4)  # FFS converted to csv as well
-    assert tree(ffs_dir) == ["converted_data.csv", "converted_data.dta", "ffs_us_v1.0.dat", "ffs_us_v1.0.sps",
-                             "ffs_us_v1.0.tbl"]
+    assert again(ext="csv") == (0, 5)  # FFS converts to dta or sav only: csv means its default dta
+    assert again(ext="sav") == (1, 4)  # FFS converted to sav as well
+    assert tree(conv_dir) == ["converted_data.dta", "converted_data.sav"]
     (at_dir / "data/AT_w1.dta").write_bytes(b"my edits")
     assert again(metadata=True) == (5, 0)
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav", "docs/Codebook.pdf"]
-    assert tree(ffs_dir) == ["converted_data.csv", "converted_data.dta", "docs/readme.txt", "ffs_us_v1.0.dat",
-                             "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]
+    assert tree(ffs_dir) == ["docs/readme.txt", "ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]
     assert not list(ffs_dir.parent.glob(".unpack-*"))  # the temporary folder is gone
     assert again(metadata=True) == (0, 5)
     assert again(force=True) == (5, 0)  # force: everything again, existing files overwritten
     assert (at_dir / "data/AT_w1.dta").read_bytes() == b"dta"
-    shutil.rmtree(ffs_dir)  # deleted by hand: what was converted before is gone too
+    shutil.rmtree(ffs_dir)  # raw files deleted by hand: downloaded again
     assert again() == (1, 4) and again(ext="dta") == (0, 5)  # no ext converts to dta too
-    assert "converted_data.dta" in tree(ffs_dir)
+    assert "ffs_us_v1.0.dat" in tree(ffs_dir) and "converted_data.dta" in tree(conv_dir)
 
     # every run is in the log next to the data, the access link never is
     text = (tmp_path / "ggp_client.log").read_text()
@@ -521,7 +521,7 @@ def test_read_preprocess_and_consolidate(tmp_path):
     import pandas as pd
     import polars as pl
     import pyreadstat
-    root, pre, out = tmp_path / "raw/downloads", tmp_path / "preprocessed", tmp_path / "consolidated"
+    root, pre, out = tmp_path / "raw/downloads", tmp_path / "processed/download", tmp_path / "consolidated"
     at, nl, ffs = (root / "ggs-ii/w1/at/ggs2_w1_at_v1.1/[raw data]", root / "ggs-ii/w1/nl/ggs2_w1_nl_v1.0",
                    root / "ffs/us")
     for d in (at, nl, ffs):
@@ -530,8 +530,14 @@ def test_read_preprocess_and_consolidate(tmp_path):
                          column_labels=["id", "Age", "AT only"], variable_value_labels={"age": {30: "thirty"}})
     pyreadstat.write_sav(pd.DataFrame({"id": [9], "age": [99]}), at / "AT.sav")  # the same file: dta is read
     pl.DataFrame({"id": [3], "age": ["n/a"], "x": [1.5], "dem07_1801": [5], "att12_2101": [7]}).write_csv(nl / "NL.csv")
-    (ffs / "ffs_us.sps").write_text("raw"), (ffs / "converted_data.dta").write_text("labelled")
-    assert [p.name for p in preprocess.datafiles(ffs)] == ["converted_data.dta"]  # not both copies of FFS
+    (ffs / "ffs_us.sps").write_text("raw"), (pre / "ffs/us").mkdir(parents=True)
+    pyreadstat.write_dta(pd.DataFrame({"V1": [1]}), pre / "ffs/us/converted_data.dta", column_labels=["Age"])
+    ffs_row = dict(project="FFS", round=None, series="FFS", wave="", country="US", version="1", local_path="ffs/us")
+    assert [(p.name, str(rel)) for p, rel in preprocess.sources(ffs_row, root, pre)] == [
+        ("converted_data.dta", "ffs/us/converted_data.dta")]  # the labelled copy in processed, not the raw .sps
+    assert preprocess.preprocess([ffs_row], root, pre) == (1, 0, [])  # parquet and meta.json next to the dta
+    assert tree(pre / "ffs/us") == ["converted_data.dta", "converted_data.meta.json", "converted_data.parquet"]
+    assert preprocess.preprocess([ffs_row], root, pre) == (0, 1, [])  # its own parquet is not a source
     rows = [dict(project="GGS", round=2, series="GGS-II", wave="w1", country=cc, version="1",
                  local_path=str(d.relative_to(root).parent if cc == "AT" else d.relative_to(root)))
             for cc, d in [("AT", at), ("NL", nl)]] + [dict(local_path=None)]  # not downloaded: ignored

@@ -10,7 +10,7 @@ and ggp_file columns say where each row came from. Everything is lazy: polars st
 
 Country-specific variables are left out: GGS names them after the GGP country number, <name>_<country><nn>
 (aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number comes
-from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country preprocessed files keep them.
+from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in processed/download keep them.
 An existing result is kept unless force.
 """
 import asyncio
@@ -33,15 +33,13 @@ COUNTRY_NUMBERS = dict(AT=21, CZ=28, DE=14, DK=37, EE=22, FI=39, FR=15, GB=43, H
 
 def groups(rows, root, pre):
     """{name: [(parquet file, country)]} for the preprocessed files of rows, one name per series and wave."""
-    root, pre = Path(root), Path(pre)
     out = defaultdict(list)
     for r in rows:
-        if r["local_path"] and (root / r["local_path"]).exists():
+        for _, rel in preprocess.sources(r, root, pre):
+            f = Path(pre) / rel.with_suffix(".parquet")
             name = f"{r['series']}_{r['wave']}" if r["wave"] else r["series"]
-            for src in preprocess.datafiles(root / r["local_path"]):
-                f = pre / src.relative_to(root).with_suffix(".parquet")
-                if f.exists():
-                    out[name.lower()].append((f, r["country"]))
+            if f.exists():
+                out[name.lower()].append((f, r["country"]))
     return dict(out)
 
 

@@ -264,14 +264,14 @@ def rewrite_sps(text, dat_name=None):
     return text
 
 
-def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=False):
+def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=False, convert_dir=None):
     """Unpack an FFS download into dest, the country folder (one dataset per country: no folder of its own).
 
     Raw files are named after the dataset: AUSTRIA.DAT becomes <stem>.dat, and .sps and .tbl likewise; when the
     archive holds several of one type (Estonia) the original name is added: <stem>_est_f.dat. The .sps is
     rewritten: $ in names becomes _, FILE= names the renamed .dat; in the .tbl a $ inside a name (IND01$01)
     becomes _ too. Documents (metadata) keep their names.
-    With convert_to the data is also saved as converted_data.<ext>.
+    With convert_to the data is also saved as converted_data.<ext>, in convert_dir (default: dest).
     Existing files are kept unless force. Returns the number of matching files.
     """
     # shortcut: two versions of one country would share converted_data.*; the portal has one per country
@@ -281,7 +281,8 @@ def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=Fa
         tmp = Path(tmp)
         n = extract.unpack_file(archive, filename, tmp, set(ext) | RAW, metadata, force=True)
         if n and convert_to:
-            n += convert(tmp, convert_to, CONVERTED, force, out_dir=dest)
+            Path(convert_dir or dest).mkdir(parents=True, exist_ok=True)
+            n += convert(tmp, convert_to, CONVERTED, force, out_dir=Path(convert_dir or dest))
         files = sorted(p for p in tmp.rglob("*") if p.is_file())
         count = collections.Counter(p.suffix.lower() for p in files)
         for sps in (p for p in files if p.suffix.lower() == ".sps"):

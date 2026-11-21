@@ -31,7 +31,8 @@ class ggpClient:
     None means all. self.rows is refreshed after sync and download.
     force: download and overwrite even files that already exist; by default existing files are never touched.
     Sync and downloads are logged to the "ggp_client" logger and to data_dir/ggp_client.log.
-    Downloads go to data_dir/raw/downloads, parquet files to data_dir/preprocessed and data_dir/consolidated;
+    Downloads go to data_dir/raw/downloads; FFS conversions and parquet files to data_dir/processed/download;
+    stacked files to data_dir/consolidated;
     the catalogue, session and log stay in data_dir.
     """
     data_dir: str | Path = "data"
@@ -50,7 +51,7 @@ class ggpClient:
         self.dir = Path(self.data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.downloads = self.dir / "raw" / "downloads"
-        self.preprocessed = self.dir / "preprocessed"
+        self.processed = self.dir / "processed" / "download"
         self.consolidated = self.dir / "consolidated"
         self.access_url = self.access_url or os.environ.get("GGP_ACCESS_URL")
         if self.concurrency < 1:
@@ -197,14 +198,15 @@ class ggpClient:
         A file that was already unpacked for these options is skipped; asking for more later
         (another ext, or metadata) downloads it again and adds the missing files to the folder.
         Files that already exist are never overwritten, unless the client was made with force=True.
-        FFS: the .dat, .sps and .tbl files are always kept, as ffs/<cc>/<stem>.dat etc., and the data is converted
-        (ffs_conversion) to ffs/<cc>/converted_data.<ext>, with variable and value labels: to ext, or dta if not given.
+        FFS: the .dat, .sps and .tbl files are kept under root, as ffs/<cc>/<stem>.dat etc., and the data is converted
+        (ffs_conversion), with variable and value labels, to data_dir/processed/download/ffs/<cc>/converted_data.<ext>:
+        dta and/or sav as ext names them, else dta.
         Returns (done, skipped, [(slug, error)]).
         """
         rows = self.rows if rows is None else rows
         root = Path(root or self.downloads)
         want = extract.norm_ext(ext)
-        convert = sorted(want) if parse.many(ext) else ["dta"]  # FFS: dta unless ext was asked for
+        convert = (sorted(want & {"dta", "sav"}) if parse.many(ext) else []) or ["dta"]  # FFS: labelled types only
         meta = {"meta"} if metadata else set()
         kept = want | meta
         done = skipped = 0
@@ -237,16 +239,16 @@ class ggpClient:
         return done, skipped, failed
 
     async def preprocess(self, rows=None):
-        """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/preprocessed,
+        """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/processed/download,
         `concurrency` at a time (see the preprocess module). Returns (done, skipped, [(file, error)])."""
         return await preprocess.preprocess_async(self.rows if rows is None else rows, self.downloads,
-                                                 self.preprocessed, self.force, self.concurrency)
+                                                 self.processed, self.force, self.concurrency)
 
     async def consolidate(self, rows=None):
         """Stack the preprocessed files of rows (default: self.rows) per series and wave into
         data_dir/consolidated/<series>_<wave>.parquet (see the consolidate module). Returns (done, skipped, [(name, error)])."""
         return await consolidate.consolidate_async(self.rows if rows is None else rows, self.downloads,
-                                                   self.preprocessed, self.consolidated, self.force)
+                                                   self.processed, self.consolidated, self.force)
 
     async def _fetch(self, r, root, want, metadata, convert=()):
         stem = r["stem"] + (f"_{r['download_id']}" if r["n_files"] > 1 else "")
@@ -271,7 +273,7 @@ class ggpClient:
                         size += len(chunk)
             if ffs:  # a conversion error fails this file, not the batch
                 n = await asyncio.to_thread(ffs_conversion.unpack, part, name, dest, stem, want, metadata,
-                                            convert, self.force)
+                                            convert, self.force, self.processed / rel)
             else:
                 n = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force)
             ok = n > 0
