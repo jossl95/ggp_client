@@ -6,7 +6,7 @@ with the record and columns of every variable, VARIABLE LABELS, VALUE LABELS, MI
 
     python -m ggp_client.ffs_conversion AUSTRIA.SPS --ext sav dta     # writes AUSTRIA.sav and AUSTRIA.dta
 
-Variable names keep their SPSS spelling except `$`, which Stata does not allow: IND01$01 becomes IND01_01.
+Every $ in a variable name becomes _ (Stata does not allow $): IND01$01 becomes IND01_01.
 Missing value codes (e.g. 98) stay in the data; sav also marks them as missing, as SPSS would.
 csv has the codes only: it cannot hold labels.
 """
