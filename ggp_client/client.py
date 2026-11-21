@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from . import consolidate, db, extract, ffs_conversion, parse, preprocess
+from . import consolidate, db, extract, parse, processing
 
 logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print request URLs: the access link is one
 log = logging.getLogger("ggp_client")  # never log access_url: it works as a password
@@ -199,7 +199,7 @@ class ggpClient:
         (another ext, or metadata) downloads it again and adds the missing files to the folder.
         Files that already exist are never overwritten, unless the client was made with force=True.
         FFS: the .dat, .sps and .tbl files are kept under root, as ffs/<cc>/<stem>.dat etc., and the data is converted
-        (ffs_conversion), with variable and value labels, to data_dir/download/processed/ffs/<cc>/converted_data.<ext>:
+        (processing.convert), with variable and value labels, to data_dir/download/processed/ffs/<cc>/converted_data.<ext>:
         dta and/or sav as ext names them, else dta.
         Returns (done, skipped, [(slug, error)]).
         """
@@ -241,7 +241,7 @@ class ggpClient:
     async def preprocess(self, rows=None):
         """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/download/processed,
         `concurrency` at a time (see the preprocess module). Returns (done, skipped, [(file, error)])."""
-        return await preprocess.preprocess_async(self.rows if rows is None else rows, self.downloads,
+        return await processing.preprocess_async(self.rows if rows is None else rows, self.downloads,
                                                  self.processed, self.force, self.concurrency)
 
     async def consolidate(self, rows=None):
@@ -272,7 +272,7 @@ class ggpClient:
                         f.write(chunk)
                         size += len(chunk)
             if ffs:  # a conversion error fails this file, not the batch
-                n = await asyncio.to_thread(ffs_conversion.unpack, part, name, dest, stem, want, metadata,
+                n = await asyncio.to_thread(processing.unpack, part, name, dest, stem, want, metadata,
                                             convert, self.force, self.processed / rel)
             else:
                 n = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force)

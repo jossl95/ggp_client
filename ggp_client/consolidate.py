@@ -27,7 +27,7 @@ from pathlib import Path
 import polars as pl
 import pyreadstat
 
-from . import preprocess, read
+from . import processing, read
 
 log = logging.getLogger("ggp_client")
 
@@ -40,7 +40,7 @@ def groups(rows, root, pre):
     """{name: [(parquet file, country, source path)]} for the preprocessed files of rows, per series and wave."""
     out = defaultdict(list)
     for r in rows:
-        for _, rel in preprocess.sources(r, root, pre):
+        for _, rel in processing.sources(r, root, pre):
             f = Path(pre) / rel.with_suffix(".parquet")
             name = f"{r['series']}_{r['wave']}" if r["wave"] else r["series"]
             if f.exists():

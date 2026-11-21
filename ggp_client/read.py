@@ -16,7 +16,6 @@ from pathlib import Path
 import polars as pl
 import pyreadstat
 
-from . import ffs_conversion
 
 FORMATS = (".parquet", ".dta", ".sav", ".csv", ".sps")  # also the preference when one file comes in several
 LAZY = (".parquet", ".csv")  # polars scans these itself; the others are read whole, then made lazy
@@ -60,7 +59,8 @@ def read(path):
     if s in LABELLED:
         return _readstat(p, output_format="polars")[0]
     if s == ".sps":
-        return pl.from_pandas(ffs_conversion.read_ffs(p, _dat(p))[0])
+        from .processing import read_ffs  # here, not at the top: processing imports this module
+        return pl.from_pandas(read_ffs(p, _dat(p))[0])
     raise ValueError(f"{p.name}: cannot read {s or 'files without a type'}; choose from {', '.join(FORMATS)}")
 
 

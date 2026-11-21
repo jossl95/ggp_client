@@ -114,7 +114,7 @@ download/processed/ffs/at/converted_data.meta.json
 
 Estonia has two samples (and a total), so its names get the sample added: `ffs_ee_est_f.dat`,
 `converted_data_est_f.sav`, ...
-From Python: `await p.download(ext=["sav"])`. A single dataset: `python -m ggp_client.ffs_conversion AUSTRIA.SPS --ext dta`.
+From Python: `await p.download(ext=["sav"])`. A single dataset: `python -m ggp_client.processing AUSTRIA.SPS --ext dta`.
 
 Conversion replaces every `$` in every variable name with `_` (Stata does not allow `$`), in all three formats:
 `IND01$01` is `IND01_01`, `V004$12` is `V004_12`. Other names are unchanged. The raw `.sps` and `.tbl` are rewritten the
@@ -139,6 +139,9 @@ attr(ffs$V917, "label")                                                         
 ```
 
 ## Reading, preprocessing and consolidating (polars)
+
+Three modules: `read` (files into polars), `processing` (FFS conversion to labelled dta/sav, and preprocessing
+to parquet + meta.json) and `consolidate` (stacking per round and wave, and the Stata export).
 
 **Reading.** `ggp_client.read` reads any downloaded data file into a polars DataFrame: `.parquet`, `.dta`, `.sav`,
 `.csv`, and an FFS `.sps` (with its `.dat`, no conversion needed). Values are the codes (value labels are not
@@ -196,8 +199,8 @@ async with ggpClient(project="ggs", concurrency=4) as p:
     await p.preprocess()          # 4 files at a time, each in a worker process: read, then polars sinks it lazily
     await p.consolidate()         # all groups in one lazy polars run (collect_all_async)
 
-from ggp_client import consolidate, preprocess   # without asyncio, one at a time
-preprocess.preprocess(p.rows, "data/download/raw", "data/download/processed")
+from ggp_client import consolidate, processing   # without asyncio, one at a time
+processing.preprocess(p.rows, "data/download/raw", "data/download/processed")
 consolidate.consolidate(p.rows, "data/download/raw", "data/download/processed", "data/download/consolidated")
 ```
 

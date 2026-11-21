@@ -11,7 +11,7 @@ import httpx
 import py7zr
 import pytest
 
-from ggp_client import consolidate, db, extract, parse, preprocess, read
+from ggp_client import consolidate, db, extract, parse, processing, read
 from ggp_client.client import LoginError, ggpClient
 
 CATALOG = """<h2>GGS-II</h2>
@@ -456,11 +456,10 @@ def test_client_holds_con_and_filtered_rows(tmp_path):
 
 
 def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
-    from ggp_client import ffs_conversion
     import pyreadstat
     (tmp_path / "USA2.SPS").write_bytes(FFS_SPS)
     (tmp_path / "USA2.DAT").write_bytes(FFS_DAT)
-    assert ffs_conversion.convert(tmp_path, ["sav", "dta", "csv"], "ffs_us_v1.0") == 3
+    assert processing.convert(tmp_path, ["sav", "dta", "csv"], "ffs_us_v1.0") == 3
     df, m = pyreadstat.read_sav(tmp_path / "ffs_us_v1.0.sav", user_missing=True)
     assert list(df.columns) == ["COUNTRY", "HHNUM", "WEIGHT", "V004_01", "V005_01"]  # $ is not allowed in Stata
     assert df["HHNUM"].tolist() == ["A0001", "A0002"] and df["WEIGHT"].tolist() == [0.7035, 1.2]
@@ -475,15 +474,14 @@ def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
     assert md.column_names_to_labels["COUNTRY"] == "ISO country code"
     assert (tmp_path / "ffs_us_v1.0.csv").read_text().splitlines()[0] == "COUNTRY,HHNUM,WEIGHT,V004_01,V005_01"
     (tmp_path / "ffs_us_v1.0.csv").write_text("mine")
-    assert ffs_conversion.convert(tmp_path, ["csv"], "ffs_us_v1.0") == 1  # exists: kept
+    assert processing.convert(tmp_path, ["csv"], "ffs_us_v1.0") == 1  # exists: kept
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() == "mine"
-    ffs_conversion.convert(tmp_path, ["csv"], "ffs_us_v1.0", force=True)
+    processing.convert(tmp_path, ["csv"], "ffs_us_v1.0", force=True)
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() != "mine"
 
 
 def test_ffs_unpack_names_like_estonia(tmp_path):
     # Estonia: two samples, ready-made .SAV instead of a .SPS, plus listings (documents)
-    from ggp_client import ffs_conversion
     import pandas as pd
     import pyreadstat
     for s in ("F", "M"):
@@ -493,7 +491,7 @@ def test_ffs_unpack_names_like_estonia(tmp_path):
     zf.write_bytes(make_zip({**{f"EST_{s}.{e}": (tmp_path / f"EST_{s}.SAV").read_bytes() if e == "SAV" else b"x"
                                 for s in ("F", "M") for e in ("SAV", "DAT", "LST")}}))
     dest = tmp_path / "ffs/ee"
-    n = ffs_conversion.unpack(zf, "ee.zip", dest, "ffs_ee_v1.0", {"dta"}, False, convert_to=["dta"])
+    n = processing.unpack(zf, "ee.zip", dest, "ffs_ee_v1.0", {"dta"}, False, convert_to=["dta"])
     assert n == 6 and tree(dest) == [  # 4 raw (the .LST listings are documents: only with metadata) + 2 converted
         "converted_data_est_f.dta", "converted_data_est_m.dta", "ffs_ee_v1.0_est_f.dat", "ffs_ee_v1.0_est_f.sav",
         "ffs_ee_v1.0_est_m.dat", "ffs_ee_v1.0_est_m.sav"]
@@ -556,20 +554,20 @@ def test_read_preprocess_and_consolidate(tmp_path):
     (ffs / "ffs_us.sps").write_text("raw"), (pre / "ffs/us").mkdir(parents=True)
     pyreadstat.write_dta(pd.DataFrame({"V1": [1]}), pre / "ffs/us/converted_data.dta", column_labels=["Age"])
     ffs_row = dict(project="FFS", round=None, series="FFS", wave="", country="US", version="1", local_path="ffs/us")
-    assert [(p.name, str(rel)) for p, rel in preprocess.sources(ffs_row, root, pre)] == [
+    assert [(p.name, str(rel)) for p, rel in processing.sources(ffs_row, root, pre)] == [
         ("converted_data.dta", "ffs/us/converted_data.dta")]  # the labelled copy in processed, not the raw .sps
-    assert preprocess.preprocess([ffs_row], root, pre) == (1, 0, [])  # parquet and meta.json next to the dta
+    assert processing.preprocess([ffs_row], root, pre) == (1, 0, [])  # parquet and meta.json next to the dta
     assert tree(pre / "ffs/us") == ["converted_data.dta", "converted_data.meta.json", "converted_data.parquet"]
-    assert preprocess.preprocess([ffs_row], root, pre) == (0, 1, [])  # its own parquet is not a source
+    assert processing.preprocess([ffs_row], root, pre) == (0, 1, [])  # its own parquet is not a source
     rows = [dict(project="GGS", round=2, series="GGS-II", wave="w1", country=cc, version="1",
                  local_path=str(d.relative_to(root).parent if cc == "AT" else d.relative_to(root)))
             for cc, d in [("AT", at), ("NL", nl)]] + [dict(local_path=None)]  # not downloaded: ignored
-    assert [p.name for p in preprocess.datafiles(at)] == ["AT.dta"] and read.read(at / "AT.sav")["age"][0] == 99
+    assert [p.name for p in processing.datafiles(at)] == ["AT.dta"] and read.read(at / "AT.sav")["age"][0] == 99
     got = asyncio.run(read.read_all_async([at / "AT.dta", nl / "NL.csv", at / "AT.sav"], 2))  # processes + polars
     assert [d["age"].to_list() for d in got] == [[30, 40], ["n/a"], [99]]
 
-    assert preprocess.preprocess(rows[:1], root, pre) == (1, 0, [])
-    assert asyncio.run(preprocess.preprocess_async(rows, root, pre)) == (1, 1, [])  # AT is already there
+    assert processing.preprocess(rows[:1], root, pre) == (1, 0, [])
+    assert asyncio.run(processing.preprocess_async(rows, root, pre)) == (1, 1, [])  # AT is already there
     df = read.read(next(pre.rglob("AT.parquet")))
     assert df["age"].to_list() == [30, 40] and df["ggp_country"].unique().to_list() == ["AT"]
     assert df["ggp_file"][0] == "ggs-ii/w1/at/ggs2_w1_at_v1.1/[raw data]/AT.dta" and df["ggp_round"][0] == 2
@@ -577,7 +575,7 @@ def test_read_preprocess_and_consolidate(tmp_path):
     assert m["column_labels"]["age"] == "Age" and m["value_labels"]["age"] == {"30": "thirty"}
     assert not list(pre.rglob("NL.meta.json"))  # csv has no labels
     next(pre.rglob("AT.meta.json")).unlink()
-    assert preprocess.preprocess(rows, root, pre) == (1, 1, [])  # a missing meta.json is made again
+    assert processing.preprocess(rows, root, pre) == (1, 1, [])  # a missing meta.json is made again
 
     assert asyncio.run(consolidate.consolidate_async(rows, root, pre, out)) == (1, 0, [])
     w1 = pl.read_parquet(out / "ggs-ii_w1.parquet")
