@@ -19,6 +19,14 @@ ggp-client download --ids 3-12,20 --all-versions
 
 `list` takes the same filters as `download`, so use it as a dry run.
 
+To get all GGS data, rounds 1 and 2 with every datafile type (dta, sav, csv), run the script at the root:
+`python download_ggs.py` (or `python download_ggs.py some_dir`). In November 2026 that was 69 files, a 0.5 GB
+download and 7.6 GB unpacked, in about 2 minutes. Three GGS-I files (Australia waves 1 and 2, Norway wave 1) give
+"404 Not Found" on the portal itself, so the script reports them and exits with 1.
+
+Some GGS-I files mix text encodings in their labels; if Python's pyreadstat refuses one, pass
+`encoding="latin1"` (or use `pandas.read_stata`). Stata and SPSS open them as they are.
+
 ## Filters
 
 `project`, `round`, `wave` and `country` each take one value, several values, or nothing (all).

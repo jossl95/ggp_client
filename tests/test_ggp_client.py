@@ -492,3 +492,18 @@ def test_ffs_unpack_names_like_estonia(tmp_path):
         "ffs_ee_v1.0_est_m.dat", "ffs_ee_v1.0_est_m.sav"]
     df, m = pyreadstat.read_dta(dest / "converted_data_est_f.dta")
     assert list(df.columns) == ["IND01_01"] and m.variable_value_labels["IND01_01"] == {1: "yes", 2: "no"}
+
+
+def test_download_ggs_script(tmp_path, capsys):
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).parent.parent / "download_ggs.py"
+    spec = importlib.util.spec_from_file_location("download_ggs", path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    code = asyncio.run(script.main(tmp_path, access_url=TOKEN, transport=httpx.MockTransport(handler)))
+    assert code == 1  # the fake NL file is a web page: reported, and the exit code says so
+    out = capsys.readouterr().out
+    assert "downloaded 1, skipped 0 already present, failed 1" in out and "failed: ggs2-nl-wave1" in out
+    assert tree(tmp_path / "downloads") == [  # GGS only (no FFS, HH, other), every datafile type kept
+        "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.dta", "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.sav"]
