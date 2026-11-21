@@ -101,9 +101,10 @@ Missing-value codes such as 98 stay in the data, are labelled, and in `.sav` are
 A cell that is not a number (the files use `*` for overflow) is read as missing, as SPSS does, and logged.
 `.csv` has the codes only.
 
-**In SPSS** the raw files work directly: open `COUNTRY.SPS`, change `FILE='C:\ISSA\...\COUNTRY.DAT'` on the first
-line to where your `.DAT` is, add `SAVE OUTFILE='COUNTRY.sav'.` at the end and run all. SPSS reads the columns and
-applies the labels and missing values.
+**In SPSS** the raw files work directly: open `ffs_at.sps`. Its first line already reads `FILE='ffs_at.dat'`
+(the original pointed at `C:\ISSA\...\AUSTRIA.DAT`); make that the full path to the file if SPSS does not find it,
+add `SAVE OUTFILE='ffs_at.sav'.` at the end and run all. SPSS reads the columns and applies the labels and
+missing values.
 
 **In R** there is no reader for SPSS syntax, so convert first (`--ext sav` or `dta`) and read the result with haven:
 
