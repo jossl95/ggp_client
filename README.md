@@ -51,9 +51,9 @@ Everything lives in `--data-dir` (default `ggp_data/`):
   page and Colectica links, target folder and file stem) and table `file` (download id, label, size, URL,
   folder, what was unpacked). Ids are assigned once and never change.
 - `downloads/<series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/`, all lowercase, one folder per downloaded file,
-  for example `downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/`. FFS has no wave level: `ffs/us/ffs_us_v1.0/`.
-  FFS has no folder per dataset: `ffs/at/ffs_at.dat`, see "FFS data". Harmonized Histories and Additional Datasets: `hh/harmonized-histories/hh_harmonized-histories_<id>/`
-  (one folder per part), `other/nkps/other_nkps/`.
+  for example `downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/`. FFS has no wave level and no folder per dataset:
+  `ffs/at/ffs_at.dat`, see "FFS data". Harmonized Histories and Additional Datasets:
+  `hh/harmonized-histories/hh_harmonized-histories_<id>/` (one folder per part), `other/nkps/other_nkps/`.
 - `.session.json`: your login session (mode 600), so the access link is used once, not on every run.
 - `ggp_client.log`: every sync and download with a time stamp: logins, each file downloaded (size, files kept,
   folder), skipped or failed (with the reason), and retries. The access link is never logged.
