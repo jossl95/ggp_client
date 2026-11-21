@@ -58,6 +58,41 @@ Everything lives in `--data-dir` (default `ggp_data/`):
 - `ggp_client.log`: every sync and download with a time stamp: logins, each file downloaded (size, files kept,
   folder), skipped or failed (with the reason), and retries. The access link is never logged.
 
+## FFS data (.dat, .sps, .tbl)
+
+Every Family and Fertility Survey archive holds three files:
+
+| file | what it is |
+|---|---|
+| `COUNTRY.DAT` | the data: fixed-width text, `records` lines per respondent (44 to 83, depending on the country) |
+| `COUNTRY.SPS` | SPSS syntax that reads it: `DATA LIST` (record and columns of each variable), `VARIABLE LABELS`, `VALUE LABELS`, `MISSING VALUE` |
+| `COUNTRY.TBL` | the published frequency tables, to check your results against; not needed to read the data |
+
+Exceptions: Estonia ships ready-made `.SAV` files instead of a `.SPS`, Greece has no `.TBL` and its `.SPS` has no labels.
+
+`ggp-client download --project ffs` keeps these raw files. Give `--ext` and they are also converted, with
+variable and value labels, to `downloads/ffs/<cc>/<folder>/<folder>.<ext>`, for example
+`ggp-client download --project ffs --country at --ext sav dta` writes `ffs/at/ffs_at/ffs_at.sav` and `.dta`.
+From Python: `await p.download(ext=["sav"])`. A single dataset: `python -m ggp_client.ffs_conversion AUSTRIA.SPS --ext dta`.
+
+Conversion keeps the SPSS variable names, except that `$` (not allowed in Stata) becomes `_`: `IND01$01` is `IND01_01`.
+Missing-value codes such as 98 stay in the data, are labelled, and in `.sav` are marked missing as SPSS would.
+A cell that is not a number (the files use `*` for overflow) is read as missing, as SPSS does, and logged.
+`.csv` has the codes only.
+
+**In SPSS** the raw files work directly: open `COUNTRY.SPS`, change `FILE='C:\ISSA\...\COUNTRY.DAT'` on the first
+line to where your `.DAT` is, add `SAVE OUTFILE='COUNTRY.sav'.` at the end and run all. SPSS reads the columns and
+applies the labels and missing values.
+
+**In R** there is no reader for SPSS syntax, so convert first (`--ext sav` or `dta`) and read the result with haven:
+
+```r
+library(haven)
+ffs <- read_sav("ggp_data/downloads/ffs/at/ffs_at/ffs_at.sav", user_na = TRUE)  # keep 98 etc. as labelled missing
+table(as_factor(ffs$RESID))                                                     # value labels as factor levels
+attr(ffs$V917, "label")                                                         # "Religion respondent"
+```
+
 ## Logging
 
 The client logs to the standard `logging` logger `"ggp_client"` (level INFO unless you set one) and appends the
