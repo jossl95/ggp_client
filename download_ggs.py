@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download all GGS data, rounds 1 and 2 (latest versions), keeping every datafile type: dta, sav and csv.
 
-    python download_ggs.py              # into data/raw/downloads
+    python download_ggs.py              # into data/download/raw
     python download_ggs.py other_dir    # elsewhere
 
 Refreshes the catalogue first (asks for the emailed access link if there is no valid session; see README,

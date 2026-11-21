@@ -1,8 +1,8 @@
-"""Stack the preprocessed parquet files per round and wave into one file: data_dir/consolidated/<series>_<wave>.parquet.
+"""Stack the preprocessed parquet files per round and wave into one file: data_dir/download/consolidated/<series>_<wave>.parquet.
 
-    consolidated/ggs-ii_w1.parquet   every GGS-II wave 1 country
-    consolidated/ggs-i_w2.parquet
-    consolidated/ffs.parquet         FFS has no waves
+    download/consolidated/ggs-ii_w1.parquet   every GGS-II wave 1 country
+    download/consolidated/ggs-i_w2.parquet
+    download/consolidated/ffs.parquet         FFS has no waves
 
 Columns are matched by name; a column a country lacks is null there, and a column with different types in
 different countries gets the type that holds both (a number and a text column become text). The ggp_country
@@ -10,7 +10,7 @@ and ggp_file columns say where each row came from. Everything is lazy: polars st
 
 Country-specific variables are left out: GGS names them after the GGP country number, <name>_<country><nn>
 (aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number comes
-from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in processed/download keep them.
+from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in download/processed keep them.
 An existing result is kept unless force.
 """
 import asyncio

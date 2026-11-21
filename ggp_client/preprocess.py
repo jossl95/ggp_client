@@ -1,10 +1,10 @@
-"""Save downloaded datafiles as parquet under data_dir/processed/download, with columns that say where each row came from.
+"""Save downloaded datafiles as parquet under data_dir/download/processed, with columns that say where each row came from.
 
-One parquet per data file, at the same path as in raw/downloads, plus a .meta.json with its labels (dta and sav):
-raw/downloads/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/GGSII_Wave1_AT_V_1_1.dta ->
-    processed/download/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/GGSII_Wave1_AT_V_1_1.parquet and GGSII_Wave1_AT_V_1_1.meta.json
+One parquet per data file, at the same path as in download/raw, plus a .meta.json with its labels (dta and sav):
+download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/GGSII_Wave1_AT_V_1_1.dta ->
+    download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/GGSII_Wave1_AT_V_1_1.parquet and GGSII_Wave1_AT_V_1_1.meta.json
 A file that comes in several types (dta, sav and csv of one dataset) is read once, in the order of read.FORMATS.
-FFS is read from its converted_data.dta/.sav, which the download puts in processed/download/ffs/<cc>/ already;
+FFS is read from its converted_data.dta/.sav, which the download puts in download/processed/ffs/<cc>/ already;
 a country without one is read from the raw .sps/.dat.
 Added columns: ggp_project, ggp_round, ggp_series, ggp_wave, ggp_country, ggp_version, ggp_file.
 An existing parquet (and meta.json) is kept unless force.
@@ -42,7 +42,7 @@ def datafiles(folder, types=read.FORMATS):
 def sources(r, root, out):
     """[(data file, its path under root or out)] of row r; none if it is not downloaded.
 
-    FFS: its converted dta/sav in out (processed/download) when there are any, else the raw files under root.
+    FFS: its converted dta/sav in out (download/processed) when there are any, else the raw files under root.
     """
     root, out, lp = Path(root), Path(out), r["local_path"]
     if not lp or not (root / lp).exists():

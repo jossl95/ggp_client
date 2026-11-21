@@ -31,8 +31,8 @@ class ggpClient:
     None means all. self.rows is refreshed after sync and download.
     force: download and overwrite even files that already exist; by default existing files are never touched.
     Sync and downloads are logged to the "ggp_client" logger and to data_dir/ggp_client.log.
-    Downloads go to data_dir/raw/downloads; FFS conversions and parquet files to data_dir/processed/download;
-    stacked files to data_dir/consolidated;
+    Downloads go to data_dir/download/raw; FFS conversions and parquet files to data_dir/download/processed;
+    stacked files to data_dir/download/consolidated;
     the catalogue, session and log stay in data_dir.
     """
     data_dir: str | Path = "data"
@@ -50,9 +50,9 @@ class ggpClient:
     def __post_init__(self):
         self.dir = Path(self.data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.downloads = self.dir / "raw" / "downloads"
-        self.processed = self.dir / "processed" / "download"
-        self.consolidated = self.dir / "consolidated"
+        self.downloads = self.dir / "download" / "raw"
+        self.processed = self.dir / "download" / "processed"
+        self.consolidated = self.dir / "download" / "consolidated"
         self.access_url = self.access_url or os.environ.get("GGP_ACCESS_URL")
         if self.concurrency < 1:
             raise ValueError("concurrency must be 1 or more")  # 0 would wait forever
@@ -191,7 +191,7 @@ class ggpClient:
         log.info("login: logged in with the access link, session saved")
 
     async def download(self, rows=None, root=None, ext=None, metadata=False):
-        """Download the files of `rows` (default: self.rows) and unpack them under root (default: data_dir/raw/downloads).
+        """Download the files of `rows` (default: self.rows) and unpack them under root (default: data_dir/download/raw).
 
         ext: datafile type(s) to keep (dta, sav, csv): one value, a list, or None for all three.
         metadata: also keep the non-data files (documentation, codebooks) from the archives.
@@ -199,7 +199,7 @@ class ggpClient:
         (another ext, or metadata) downloads it again and adds the missing files to the folder.
         Files that already exist are never overwritten, unless the client was made with force=True.
         FFS: the .dat, .sps and .tbl files are kept under root, as ffs/<cc>/<stem>.dat etc., and the data is converted
-        (ffs_conversion), with variable and value labels, to data_dir/processed/download/ffs/<cc>/converted_data.<ext>:
+        (ffs_conversion), with variable and value labels, to data_dir/download/processed/ffs/<cc>/converted_data.<ext>:
         dta and/or sav as ext names them, else dta.
         Returns (done, skipped, [(slug, error)]).
         """
@@ -239,14 +239,14 @@ class ggpClient:
         return done, skipped, failed
 
     async def preprocess(self, rows=None):
-        """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/processed/download,
+        """Save the downloaded data files of rows (default: self.rows) as parquet in data_dir/download/processed,
         `concurrency` at a time (see the preprocess module). Returns (done, skipped, [(file, error)])."""
         return await preprocess.preprocess_async(self.rows if rows is None else rows, self.downloads,
                                                  self.processed, self.force, self.concurrency)
 
     async def consolidate(self, rows=None):
         """Stack the preprocessed files of rows (default: self.rows) per series and wave into
-        data_dir/consolidated/<series>_<wave>.parquet (see the consolidate module). Returns (done, skipped, [(name, error)])."""
+        data_dir/download/consolidated/<series>_<wave>.parquet (see the consolidate module). Returns (done, skipped, [(name, error)])."""
         return await consolidate.consolidate_async(self.rows if rows is None else rows, self.downloads,
                                                    self.processed, self.consolidated, self.force)
 

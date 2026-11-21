@@ -282,10 +282,10 @@ def test_sync_download_select(tmp_path):
     assert (done, skipped) == (5, 0)
     assert [b[0] for b in bad] == ["ggs2-nl-wave1"] and "web page" in bad[0][1]
     at_dir = tmp_path / "dl/ggs-ii/w1/at/ggs2_w1_at_v1.1"
-    ffs_dir, conv_dir = tmp_path / "dl/ffs/us", tmp_path / "processed/download/ffs/us"
+    ffs_dir, conv_dir = tmp_path / "dl/ffs/us", tmp_path / "download/processed/ffs/us"
     assert tree(at_dir) == ["data/AT_w1.dta", "data/AT_w1.sav"]
     assert tree(ffs_dir) == ["ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]  # FFS: raw here
-    assert tree(conv_dir) == ["converted_data.dta"]  # and converted (dta by default) in processed/download
+    assert tree(conv_dir) == ["converted_data.dta"]  # and converted (dta by default) in download/processed
     sps = (ffs_dir / "ffs_us_v1.0.sps").read_bytes().decode("latin-1")  # rewritten: names with _, FILE= the new .dat
     assert sps.startswith("DATA LIST FILE='ffs_us_v1.0.dat' records=2\r\n")
     assert "V004_01  15-16" in sps and "\r\n V005_01\r\n" in sps and '"Caseweight in US$"' in sps
@@ -512,7 +512,7 @@ def test_download_ggs_script(tmp_path, capsys):
     assert code == 1  # the fake NL file is a web page: reported, and the exit code says so
     out = capsys.readouterr().out
     assert "downloaded 1, skipped 0 already present, failed 1" in out and "failed: ggs2-nl-wave1" in out
-    assert tree(tmp_path / "raw/downloads") == [  # GGS only (no FFS, HH, other), every datafile type kept
+    assert tree(tmp_path / "download/raw") == [  # GGS only (no FFS, HH, other), every datafile type kept
         "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.dta", "ggs-ii/w1/at/ggs2_w1_at_v1.1/data/AT_w1.sav"]
 
 
@@ -521,7 +521,7 @@ def test_read_preprocess_and_consolidate(tmp_path):
     import pandas as pd
     import polars as pl
     import pyreadstat
-    root, pre, out = tmp_path / "raw/downloads", tmp_path / "processed/download", tmp_path / "consolidated"
+    root, pre, out = tmp_path / "download/raw", tmp_path / "download/processed", tmp_path / "download/consolidated"
     at, nl, ffs = (root / "ggs-ii/w1/at/ggs2_w1_at_v1.1/[raw data]", root / "ggs-ii/w1/nl/ggs2_w1_nl_v1.0",
                    root / "ffs/us")
     for d in (at, nl, ffs):
