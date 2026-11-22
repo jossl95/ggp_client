@@ -101,5 +101,5 @@ async with ggpClient(project="ggs", round=2) as p:
     await p.consolidate()  # one dataset per round and wave
 ```
 
-See the [GGS-II use case](ggs-ii.qmd) for what these produce, and the [reference](reference.qmd) for every
+See the [GGS-II article](ggs-ii.qmd) for what these produce, and the [reference](reference.qmd) for every
 argument and for the same steps as `ggp-client` commands on the command line.
