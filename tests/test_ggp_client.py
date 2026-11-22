@@ -603,3 +603,29 @@ def test_read_preprocess_and_consolidate(tmp_path):
     assert consolidate.country_columns(pl.LazyFrame({"country": [55, 56], "v1_5501": [1, 2]}), "") == []
     assert asyncio.run(read.read_async(at / "AT.dta"))["age"].to_list() == [30, 40]
     assert not list(tmp_path.rglob("*.part.*"))
+
+
+def test_merged_meta_harmonizes_labels(tmp_path):
+    import json
+    from pathlib import Path
+    files = []
+    for name, var, values in [
+            ("AT", "Country", {"203": "Czechia", "1": "East Austria", "3": "elementary school", "-1": "Don't know"}),
+            ("HR", "Country", {"203": "czechia ", "1": "Pannonian Croatia", "4": "Elementary school", "-1": "Don't know"}),
+            ("GB", "Land", {"203": "Czech Republic", "1": "East Midlands", "-1": "don't know"})]:
+        f = tmp_path / f"{name}.parquet"
+        (tmp_path / f"{name}.meta.json").write_text(json.dumps(dict(
+            column_labels={"cc": var, "gone": "x"}, value_labels={"cc": values})))
+        files.append((f, name, f"{name}.dta"))
+    files.append((tmp_path / "NL.parquet", "NL", "NL.csv"))  # csv: no meta.json, skipped
+    m = consolidate.merged_meta(files, {"cc"})
+    assert m["column_labels"] == {"cc": "Country"}  # the label most files use; dropped columns left out
+    v = m["value_labels"]["cc"]
+    assert v["203"] == "Czechia"  # majority (spelling and case variants count as one)
+    assert v["1"] == "East Austria / Pannonian Croatia / East Midlands"  # no majority: all of them
+    assert v["-1"] == "Don't know"
+    assert v["3"] == "elementary school [3]" and v["4"] == "Elementary school [4]"  # one label, two codes: tagged
+    assert len({x.casefold() for x in v.values()}) == len(v)  # every label unique
+    assert m["original_labels"]["cc"]["1"] == {"East Austria": ["AT.parquet"], "Pannonian Croatia": ["HR.parquet"],
+                                               "East Midlands": ["GB.parquet"]}
+    assert "3" not in m["original_labels"]["cc"]  # labelled one way only

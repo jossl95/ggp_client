@@ -173,7 +173,17 @@ want a smaller file of that name. A dataset shipped as two files is in it twice;
 (GGS-II Belarus wave 1 comes in English and Russian, `..._RU.dta`).
 
 Each consolidated file gets `<name>.meta.json`: the variable and value labels of its input files, for the variables
-it kept. Where countries label a code differently, the first file (in catalogue order) wins.
+it kept, harmonized so that every variable has one label and every code and every label is unique:
+
+- variable label: the one most files use (`respid`: "Respondent ID", not the Russian file's);
+- a code labelled differently by countries gets the label more than half of them use (ISO 203: "Czechia", over
+  "Czech Republic"); with no majority, all labels joined, most used first (`region` 1: "East Austria / East
+  Midlands / Pannonian Croatia / ..."). Spelling and case variants count as one label;
+- a label left on several codes gets its code added: `dem07` 2102 "Elementary school [2102]" (Austria) and 3103
+  "Elementary school [3103]" (Croatia); GGS-I Norway's own codes (2001 "detached house [2001]") and Stata's missing
+  codes (.b "refusal [b]") likewise;
+- codes are never changed, so the data is exactly that of the countries;
+- `original_labels` lists, for every code labelled differently, each wording and the files that use it.
 `consolidate.to_stata(parquet)` (or `to_stata_async([...])`, in processes) writes `<name>.dta` from the parquet and
 its meta.json with the labels applied. Stata attaches value labels to whole numbers only, so they go on integer
 columns and on decimal columns that hold only whole numbers; columns that are empty everywhere become numeric.

@@ -11,8 +11,8 @@ and ggp_file columns say where each row came from. Everything is lazy: polars st
 Country-specific variables are left out: GGS names them after the GGP country number, <name>_<country><nn>
 (aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number comes
 from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in download/processed keep them.
-Each result gets <name>.meta.json: the variable and value labels of its input files (the first file wins where
-countries differ). to_stata() writes <name>.dta from the two, with the labels applied.
+Each result gets <name>.meta.json: the variable and value labels of its input files, harmonized (see
+merged_meta). to_stata() writes <name>.dta from the two, with the labels applied.
 An existing result is kept while it is up to date: it holds exactly the files of the rows given and is newer
 than all of them. Otherwise (a country added or left out, a file preprocessed again) it is made again.
 """
@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import polars as pl
@@ -98,25 +98,53 @@ def _meta(parquet):
     return parquet.with_suffix(".meta.json")
 
 
-def merged_meta(files, columns):
-    """The labels of a consolidated file: those of its input files' meta.json, for the columns it kept.
+def _norm(label):
+    return " ".join(label.split()).casefold()  # "Czech  Republic" and "czech republic" are one label
 
-    A variable gets the first label found; its value labels are the union, the first file winning a code that
-    countries label differently.
+
+def _pick(spellings):
+    """The label most files use (by its normalized form), in its most common spelling; ties go to the first file."""
+    counts = Counter(_norm(s) for s in spellings)
+    top = counts.most_common(1)[0][0]
+    return Counter(s for s in spellings if _norm(s) == top).most_common(1)[0][0], counts
+
+
+def merged_meta(files, columns):
+    """The harmonized labels of a consolidated file, from its input files' meta.json, for the columns it kept.
+
+    Variable label: the one most files use. Value labels, per variable: a code gets the label more than half of the
+    files that label it use; with no such majority, all its labels joined by " / " (most used first). A label left
+    on several codes gets its code added, "elementary school [2102]", so every code and every label is unique.
+    Codes are never changed. original_labels keeps, for every code labelled differently, each wording and its files.
     """
-    out = dict(column_labels={}, value_labels={})
+    names, labels = defaultdict(list), defaultdict(lambda: defaultdict(list))  # labels[var][code] = [(label, file)]
     for f, *_ in files:
         if not _meta(f).exists():  # csv sources have none
             continue
         m = json.loads(_meta(f).read_text(encoding="utf-8"))
         for c, label in m["column_labels"].items():
             if label and c in columns:
-                out["column_labels"].setdefault(c, label)
-        for c, labels in m["value_labels"].items():
+                names[c].append(label)
+        for c, d in m["value_labels"].items():
             if c in columns:
-                d = out["value_labels"].setdefault(c, {})
-                for k, v in labels.items():
-                    d.setdefault(k, v)
+                for k, v in d.items():
+                    if v:
+                        labels[c][k].append((v, f.name))
+    out = dict(column_labels={c: _pick(v)[0] for c, v in names.items()}, value_labels={}, original_labels={})
+    for c, codes in labels.items():
+        d = {}
+        for k, found in codes.items():
+            label, counts = _pick([v for v, _ in found])
+            if len(counts) > 1:
+                if counts[_norm(label)] * 2 <= len(found):  # no majority: say what each country means
+                    label = " / ".join(_pick([v for v, _ in found if _norm(v) == n])[0] for n, _ in counts.most_common())
+                orig = defaultdict(list)
+                for v, f in found:
+                    orig[v].append(f)
+                out["original_labels"].setdefault(c, {})[k] = dict(orig)
+            d[k] = label
+        shared = Counter(_norm(v) for v in d.values())
+        out["value_labels"][c] = {k: f"{v} [{k}]" if shared[_norm(v)] > 1 else v for k, v in d.items()}
     return out
 
 
