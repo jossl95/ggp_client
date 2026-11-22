@@ -56,8 +56,8 @@ Result, in `data/`:
 download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1.dta                as downloaded, named after the dataset
 download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1.parquet      one file as parquet
 download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1.meta.json    its labels
-download/consolidated/ggs-ii_w1.parquet                                         all countries of wave 1
-download/consolidated/ggs-ii_w1.meta.json                                       their harmonized labels
+download/consolidated/ggs-ii_w1.parquet                      all countries of wave 1
+download/consolidated/ggs-ii_w1.meta.json                    their harmonized labels
 ```
 
 GGS-II wave 1 is 185,660 rows of 20 countries and 4,001 variables. The columns `ggp_country`, `ggp_round`,
