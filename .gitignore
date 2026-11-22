@@ -239,5 +239,5 @@ ggp_client.log
 *.[sS][pP][sS]
 *.[tT][bB][lL]
 
-# the shared test fixtures hold small .dat and .sps files
-!tests/fixtures/**
+# the FFS test fixtures are small .dat and .sps files; allow only these two
+!tests/fixtures/ffs/USA2.*
