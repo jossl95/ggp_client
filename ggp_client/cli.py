@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 
-from . import db, parse, processing, read
+from . import db, filters, parse, processing, read
 from .client import LoginError, ggpClient
 
 
@@ -20,24 +20,6 @@ def positive(v):
 def add_access_url(ap):
     ap.add_argument("--access-url", help="the emailed link; default: you are asked for it, hidden "
                                          "(a flag ends up in your shell history)")
-
-
-def add_filters(ap):
-    ap.add_argument("--project", nargs="+", default=[], help="ggs, ffs, hh, other, teaching (default: all)")
-    ap.add_argument("--round", nargs="+", default=[], help="1 or 2, or i, ii (default: all)")
-    ap.add_argument("--wave", nargs="+", default=[], help="w1 w2 pilot ... (default: all)")
-    ap.add_argument("--country", nargs="+", default=[], help="country codes, e.g. nl at (default: all)")
-    ap.add_argument("--ids", help="catalogue ids or ranges, e.g. 3-12,20")
-    ap.add_argument("--all-versions", action="store_true", help="include superseded versions")
-
-
-def filters(a):
-    try:
-        ids = db.parse_ids(a.ids) if a.ids else None
-    except ValueError as e:
-        sys.exit(str(e))
-    return dict(project=a.project, round=a.round, wave=a.wave, country=a.country, ids=ids,
-                all_versions=a.all_versions)
 
 
 def show(rows):
@@ -60,10 +42,10 @@ def main(argv=None):
     s.add_argument("--dump", metavar="DIR", help="also save the raw HTML pages, for debugging the parser")
     add_access_url(s)
 
-    add_filters(sub.add_parser("list", help="show indexed datasets"))
+    filters.add_arguments(sub.add_parser("list", help="show indexed datasets"))
 
     d = sub.add_parser("download", help="download and unpack datasets (needs the emailed access link)")
-    add_filters(d)
+    filters.add_arguments(d)
     add_access_url(d)
     d.add_argument("--concurrency", type=positive, default=3)
     d.add_argument("--ext", nargs="+", default=[], help="datafile types to keep: dta sav csv (default: all three); "
@@ -74,7 +56,7 @@ def main(argv=None):
     for cmd, text in [("preprocess", "save downloaded data files as parquet in <data-dir>/download/processed"),
                       ("consolidate", "stack preprocessed files per round and wave in <data-dir>/download/consolidated")]:
         c = sub.add_parser(cmd, help=text)
-        add_filters(c)
+        filters.add_arguments(c)
         c.add_argument("--concurrency", type=positive, default=4)
         c.add_argument("--force", action="store_true", help="redo and overwrite files that already exist")
 
@@ -120,14 +102,14 @@ def main(argv=None):
     if a.cmd == "list":
         data.mkdir(parents=True, exist_ok=True)
         try:
-            show(db.select(db.connect(data / "catalogue.sqlite"), **filters(a)))
+            show(db.select(db.connect(data / "catalogue.sqlite"), **filters.from_args(a)))
         except ValueError as e:
             sys.exit(str(e))
         return
 
     if a.cmd in ("preprocess", "consolidate"):
         async def work():
-            async with ggpClient(data, concurrency=a.concurrency, force=a.force, **filters(a)) as p:
+            async with ggpClient(data, concurrency=a.concurrency, force=a.force, **filters.from_args(a)) as p:
                 return await getattr(p, a.cmd)()
         try:
             done, skipped, failed = asyncio.run(work())
@@ -139,7 +121,7 @@ def main(argv=None):
         return
 
     async def run():
-        async with ggpClient(data, a.access_url, a.concurrency, force=a.force, **filters(a)) as p:
+        async with ggpClient(data, a.access_url, a.concurrency, force=a.force, **filters.from_args(a)) as p:
             if not p.rows:
                 sys.exit("nothing to download (run 'ggp-client sync' first, or loosen the filters)")
             await p.login()

@@ -1,0 +1,40 @@
+---
+title: "Contract with the R package"
+---
+
+ggp-client has a twin written natively in R, [ggpclient](https://jossl95.github.io/ggpclientR/). They are two
+implementations of one contract: a file written by one is read by the other. This page is that contract.
+
+## What both write
+
+```
+data/catalogue.sqlite                         the same schema (tables dataset and file)
+data/.session.json                            the login: [{name, value, domain, path}], mode 600
+data/download/raw/<series>/<wave>/<cc>/<stem>/...   lower-case folders and datafile names
+data/download/processed/.../<file>.parquet    + <file>.meta.json
+data/download/consolidated/<series>_<wave>.parquet  + .meta.json  (+ .dta)
+```
+
+- Provenance columns: `ggp_project`, `ggp_round`, `ggp_series`, `ggp_wave`, `ggp_country`, `ggp_version`, `ggp_file`.
+- `meta.json`: `file_label`, `column_labels`, `value_labels` (codes as text; Stata's extended missing values `.a` are
+  `"a"`), `missing_ranges`, `original_types`. Consolidated: `column_labels`, `value_labels`, `original_labels`.
+- The login is the only session file: the R package keeps a curl cookie jar next to it and rebuilds it from the JSON.
+
+## Rules both follow
+
+- **Country-specific variables** are named `..._<GGP country number><nn>`. The number is the file's own `country`
+  variable when it holds one value in 10-99, else the `COUNTRY_NUMBERS` table. They are left out of consolidated files.
+- **Labels are harmonized over the countries, each voting once** (the first file of a country):
+  a variable gets the label most countries use; a value gets the label more than half of the countries use (spelling
+  and case variants count as one), else all labels joined with `" / "`, most used first. Several values may share a
+  label. Codes never change. `original_labels` lists every wording and the files that use it.
+- **Types**: a column that differs between countries gets the type that holds both (a number and a text column
+  become text).
+- Existing files are never overwritten without `force`; a consolidated file is rebuilt when its input files change.
+
+## The shared test fixtures
+
+`tests/fixtures/` holds portal pages, an FFS dataset, a label case, and the results this package must produce for
+them (`expected/*.json`). The R package keeps a copy and tests against the same files; its CI compares the copy with
+this folder. After changing a rule on purpose, run `python tests/fixtures/regenerate.py`, review the diff, and update
+the R package.

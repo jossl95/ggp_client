@@ -15,6 +15,7 @@ website:
       - getting-started.qmd
       - ggs-ii.qmd
       - labels.qmd
+      - contract.qmd
       - r.qmd
       - ffs.qmd
       - reference.qmd

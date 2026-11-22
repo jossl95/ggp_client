@@ -9,10 +9,10 @@ different countries gets the type that holds both (a number and a text column be
 and ggp_file columns say where each row came from. Everything is lazy: polars streams the files into the result.
 
 Country-specific variables are left out: GGS names them after the GGP country number, <name>_<country><nn>
-(aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number comes
-from COUNTRY_NUMBERS, or else from the file's own `country` variable. The per-country files in download/processed keep them.
+(aut01a_2101 and covid_2201a are Austria's 21 and Estonia's 22; dem07_1401 is Germany's 14). The number is the file's own
+`country` variable, or else COUNTRY_NUMBERS. The per-country files in download/processed keep them.
 Each result gets <name>.meta.json: the variable and value labels of its input files, harmonized (see
-merged_meta). to_stata() writes <name>.dta from the two, with the labels applied.
+labels.merged_meta). to_stata() writes <name>.dta from the two, with the labels applied.
 An existing result is kept while it is up to date: it holds exactly the files of the rows given and is newer
 than all of them. Otherwise (a country added or left out, a file preprocessed again) it is made again.
 """
@@ -27,7 +27,7 @@ from pathlib import Path
 import polars as pl
 import pyreadstat
 
-from . import processing, read
+from . import labels, processing, read
 
 log = logging.getLogger("ggp_client")
 
@@ -49,14 +49,19 @@ def groups(rows, root, pre):
 
 
 def country_columns(lf, country):
-    """The names in lf that end in this country's number: aut01a_2101 for Austria (21)."""
+    """The names in lf that end in this country's number: aut01a_2101 for Austria (21).
+
+    The number is the file's own `country` variable, when it holds one value in 10-99; else COUNTRY_NUMBERS, by the
+    country code of the dataset (Kazakhstan's file has no `country` variable; a table never knows a new country).
+    """
     names = lf.collect_schema().names()
-    number = COUNTRY_NUMBERS.get((country or "").upper())
     own = next((c for c in names if c.lower() == "country"), None)
-    if number is None and own:
+    number = None
+    if own:
         vals = lf.select(pl.col(own).drop_nulls().unique()).collect().to_series().to_list()
         v = vals[0] if len(vals) == 1 else None  # several countries in one file: no number of its own
         number = int(v) if isinstance(v, (int, float)) and 10 <= v < 100 else None
+    number = number or COUNTRY_NUMBERS.get((country or "").upper())
     return [c for c in names if number and re.search(rf"_{number}\d\d[a-z]*$", c, re.I)]
 
 
@@ -94,75 +99,13 @@ def _todo(rows, root, pre, out, force):
     return todo, skipped
 
 
-def _meta(parquet):
-    return parquet.with_suffix(".meta.json")
-
-
-def _norm(label):
-    return " ".join(label.split()).casefold()  # "Czech  Republic" and "czech republic" are one label
-
-
-def _pick(spellings):
-    """The label most files use (by its normalized form), in its most common spelling; ties go to the first file."""
-    counts = Counter(_norm(s) for s in spellings)
-    top = counts.most_common(1)[0][0]
-    return Counter(s for s in spellings if _norm(s) == top).most_common(1)[0][0], counts
-
-
-def _votes(found):
-    """[label] with the first label of each voter only, from [(label, voter)]."""
-    first = {}
-    for label, voter in found:
-        first.setdefault(voter, label)
-    return list(first.values())
-
-
-def merged_meta(files, columns):
-    """The harmonized labels of a consolidated file, from its input files' meta.json, for the columns it kept.
-
-    Each country has one vote, that of its first file: Belarus ships GGS-II wave 1 in English and in Russian.
-    Variable label: the one most countries use. Value labels, per variable: a code gets the label more than half of
-    the countries that label it use; with no such majority, all their labels joined by " / " (most used first).
-    So every value has exactly one label; several values may share one (2102 and 3103 "Elementary school").
-    Codes are never changed. original_labels keeps, for every code labelled differently in any file, each
-    wording and the source files (under download/raw, or download/processed for FFS) that use it.
-    """
-    names, labels = defaultdict(list), defaultdict(lambda: defaultdict(list))  # labels[var][code] = [(label, src, voter)]
-    for f, country, src in files:
-        voter = country or src  # Harmonized Histories and Additional Datasets have no country: a vote per file
-        if not _meta(f).exists():  # csv sources have none
-            continue
-        m = json.loads(_meta(f).read_text(encoding="utf-8"))
-        for c, label in m["column_labels"].items():
-            if label and c in columns:
-                names[c].append((label, voter))
-        for c, d in m["value_labels"].items():
-            if c in columns:
-                for k, v in d.items():
-                    if v:
-                        labels[c][k].append((v, src, voter))
-    out = dict(column_labels={c: _pick(_votes(v))[0] for c, v in names.items()}, value_labels={}, original_labels={})
-    for c, codes in labels.items():
-        d = {}
-        for k, found in codes.items():
-            votes = _votes([(v, voter) for v, _, voter in found])
-            label, counts = _pick(votes)
-            if len(counts) > 1 and counts[_norm(label)] * 2 <= len(votes):  # no majority: say what each country means
-                label = " / ".join(_pick([v for v in votes if _norm(v) == n])[0] for n, _ in counts.most_common())
-            if len({_norm(v) for v, *_ in found}) > 1:
-                orig = defaultdict(list)
-                for v, f, _ in found:
-                    orig[v].append(f)
-                out["original_labels"].setdefault(c, {})[k] = dict(orig)
-            d[k] = label
-        out["value_labels"][c] = d
-    return out
+_meta = labels.meta_path
 
 
 def _done(out, name, files):
     target = out / f"{name}.parquet"
     columns = set(pl.read_parquet_schema(out / f"{name}.part.parquet"))
-    _meta(target).write_text(json.dumps(merged_meta(files, columns), ensure_ascii=False, indent=1), encoding="utf-8")
+    _meta(target).write_text(json.dumps(labels.merged_meta(files, columns), ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(out / f"{name}.part.parquet", target)  # last: a parquet without its meta.json is never current
     log.info("consolidated %d files into %s.parquet", len(files), name)
 

@@ -9,9 +9,10 @@ import zipfile
 
 import httpx
 import py7zr
+import polars as pl
 import pytest
 
-from ggp_client import consolidate, db, extract, parse, processing, read
+from ggp_client import client, consolidate, db, extract, labels, parse, processing, read
 from ggp_client.client import LoginError, ggpClient
 
 CATALOG = """<h2>GGS-II</h2>
@@ -622,7 +623,7 @@ def test_merged_meta_harmonizes_labels(tmp_path):
             column_labels={"cc": var, "gone": "x"}, value_labels={"cc": values})))
         files.append((f, name[:2], f"ggs/{name[:2].lower()}/{name}.dta"))
     files.append((tmp_path / "NL.parquet", "NL", "NL.csv"))  # csv: no meta.json, skipped
-    m = consolidate.merged_meta(files, {"cc"})
+    m = labels.merged_meta(files, {"cc"})
     assert m["column_labels"] == {"cc": "Country"}  # the label most files use; dropped columns left out
     v = m["value_labels"]["cc"]
     assert v["203"] == "Czechia"  # majority (spelling and case variants count as one)
@@ -634,3 +635,60 @@ def test_merged_meta_harmonizes_labels(tmp_path):
                                                "East Midlands": ["ggs/gb/GB.dta"]}
     assert m["original_labels"]["cc"]["-1"]["Не знаю"] == ["ggs/gb/GB_RU.dta"]  # every file's wording is kept
     assert "3" not in m["original_labels"]["cc"]  # labelled one way only
+
+
+def test_download_is_tried_again_when_cut_short_and_checked_against_the_catalogue(tmp_path, monkeypatch):
+    calls = []
+    zipped = make_zip({"x.dta": b"d" * 100})
+
+    def flaky(req):
+        if req.url.path != "/form/download/95/":
+            return handler(req)
+        calls.append(1)
+        body = zipped[:20] if len(calls) < 3 else zipped  # cut short twice, whole the third time
+        return httpx.Response(200, content=body, headers={"content-type": "application/zip",
+                                                          "content-length": str(len(zipped))})
+
+    async def go(h, d):
+        async with ggpClient(d, TOKEN, transport=httpx.MockTransport(h), country="at") as p:
+            await p.sync()
+            await p.login()
+            return await p.download(ext="dta")
+
+    assert asyncio.run(go(flaky, tmp_path / 'a'))[:3:2] == (1, [])  # done, no failures
+    assert len(calls) == 3
+
+    calls.clear()  # always cut short: fails after RETRIES attempts, says why
+    monkeypatch.setattr(client, "RETRIES", 2)
+    always = lambda req: (calls.append(1) or httpx.Response(200, content=zipped[:20], headers={
+        "content-type": "application/zip", "content-length": str(len(zipped))})) if req.url.path == "/form/download/95/" else handler(req)
+    done, _, failed = asyncio.run(go(always, tmp_path / 'b'))
+    assert done == 0 and len(calls) == 2 and "cut short" in failed[0][1]
+
+
+def test_country_number_from_the_files_own_variable_first():
+    # the file's own country variable (21) wins over the table (DE is 14); the table is the fallback without one
+    lf = pl.LazyFrame({"country": [21.0, 21.0], "v1_2101": [1, 2], "v1_1401": [1, 2]})
+    assert consolidate.country_columns(lf, "DE") == ["v1_2101"]
+    assert consolidate.country_columns(pl.LazyFrame({"v1_2101": [1], "v1_1401": [1]}), "DE") == ["v1_1401"]
+
+
+def test_readers_return_polars_or_pandas(tmp_path):
+    import pandas as pd
+    import pyreadstat
+    src = pd.DataFrame({"id": [1, 2], "age": [30.0, 40.0]})
+    pyreadstat.write_dta(src, tmp_path / "a.dta", variable_value_labels={"age": {30: "thirty"}})
+    pyreadstat.write_sav(src, tmp_path / "a.sav")
+    pl.from_pandas(src).write_parquet(tmp_path / "a.parquet")
+    pl.from_pandas(src).write_csv(tmp_path / "a.csv")
+    for name in ("a.dta", "a.sav", "a.parquet", "a.csv"):
+        assert isinstance(read.read(tmp_path / name), pl.DataFrame)
+        got = read.read(tmp_path / name, "pandas")
+        assert isinstance(got, pd.DataFrame) and got["age"].tolist() == [30, 40], name
+        assert isinstance(asyncio.run(read.read_async(tmp_path / name, "pandas")), pd.DataFrame)
+    two = asyncio.run(read.read_all_async([tmp_path / "a.dta", tmp_path / "a.parquet"], 2, "pandas"))
+    assert all(isinstance(d, pd.DataFrame) for d in two)
+    with pytest.raises(ValueError, match="output must be"):
+        read.read(tmp_path / "a.dta", "numpy")
+    with pytest.raises(ValueError, match="output must be"):
+        read.read(tmp_path / "a.csv", "numpy")

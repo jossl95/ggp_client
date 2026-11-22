@@ -1,6 +1,7 @@
-"""Read a downloaded datafile into polars: .parquet, .dta, .sav, .csv, or an FFS .sps (with its .dat).
+"""Read a downloaded datafile into polars or pandas: .parquet, .dta, .sav, .csv, or an FFS .sps (with its .dat).
 
     df = read("ggsii_wave1_at_v_1_1.dta")          # polars DataFrame
+    df = read("ggsii_wave1_at_v_1_1.dta", "pandas")  # pandas DataFrame
     lf = scan("ggsii_wave1_at_v_1_1.parquet")      # polars LazyFrame
     df = await read_async("ggsii_wave1_at_v_1_1.sav")
     dfs = await read_all_async([...], concurrency=4)   # several files at once
@@ -13,6 +14,7 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import narwhals as nw
 import polars as pl
 import pyreadstat
 
@@ -20,6 +22,7 @@ import pyreadstat
 FORMATS = (".parquet", ".dta", ".sav", ".csv", ".sps")  # also the preference when one file comes in several
 LAZY = (".parquet", ".csv")  # polars scans these itself; the others are read whole, then made lazy
 LABELLED = (".dta", ".sav")  # the types that carry variable and value labels
+OUTPUTS = ("polars", "pandas")  # the frames the readers return
 
 
 def _dat(sps):
@@ -50,17 +53,27 @@ def scan(path):
     return read(p).lazy()
 
 
-def read(path):
-    """A DataFrame of the file."""
+def _as(df, output):
+    """df (polars or pandas) as `output`: narwhals converts, whatever it was read as."""
+    if output not in OUTPUTS:
+        raise ValueError(f"output must be one of {', '.join(OUTPUTS)}, not {output!r}")
+    frame = nw.from_native(df)
+    return frame.to_pandas() if output == "pandas" else frame.to_polars()
+
+
+def read(path, output="polars"):
+    """A DataFrame of the file, polars (default) or pandas."""
     p = Path(path)
     s = p.suffix.lower()
     if s in LAZY:
-        return scan(p).collect()
+        return _as(scan(p).collect(), output)
     if s in LABELLED:
-        return _readstat(p, output_format="polars")[0]
+        if output not in OUTPUTS:
+            _as(None, output)  # the same error for every type
+        return _readstat(p, output_format=output)[0]  # pyreadstat makes either frame itself
     if s == ".sps":
         from .processing import read_ffs  # here, not at the top: processing imports this module
-        return pl.from_pandas(read_ffs(p, _dat(p))[0])
+        return _as(read_ffs(p, _dat(p))[0], output)
     raise ValueError(f"{p.name}: cannot read {s or 'files without a type'}; choose from {', '.join(FORMATS)}")
 
 
@@ -72,21 +85,25 @@ def pool(workers):
     return ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("spawn"))
 
 
-async def read_all_async(paths, concurrency=4):
-    """[read(p) for p in paths], concurrently: parquet and csv on polars' async engine, the others in
+async def read_all_async(paths, concurrency=4, output="polars"):
+    """[read(p, output) for p in paths], concurrently: parquet and csv on polars' async engine, the others in
     `concurrency` processes."""
     loop = asyncio.get_running_loop()
     with pool(concurrency) as ex:  # processes start only when a dta/sav/sps comes along
-        return await asyncio.gather(*(scan(p).collect_async() if Path(p).suffix.lower() in LAZY
-                                      else loop.run_in_executor(ex, read, p) for p in paths))
+        return await asyncio.gather(*(_as_async(scan(p).collect_async(), output) if Path(p).suffix.lower() in LAZY
+                                      else loop.run_in_executor(ex, read, p, output) for p in paths))
 
 
-async def read_async(path):
+async def _as_async(awaitable, output):
+    return _as(await awaitable, output)
+
+
+async def read_async(path, output="polars"):
     """read() in a thread: for one file a worker process costs more to start than it saves (use read_all_async
     for several). pyreadstat holds the GIL, so other tasks may pause while a dta/sav is read."""
     if Path(path).suffix.lower() in LAZY:
-        return await scan(path).collect_async()
-    return await asyncio.to_thread(read, path)
+        return await _as_async(scan(path).collect_async(), output)
+    return await asyncio.to_thread(read, path, output)
 
 
 def meta(path):

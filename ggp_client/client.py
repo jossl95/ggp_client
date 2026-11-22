@@ -12,11 +12,13 @@ from pathlib import Path
 
 import httpx
 
-from . import consolidate, db, extract, parse, processing
+from . import consolidate, db, extract, filters, parse, processing
 
 logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines print request URLs: the access link is one
 log = logging.getLogger("ggp_client")  # never log access_url: it works as a password
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+RETRIES = 3  # attempts per download
+RETRY_WAIT = 2.0  # seconds before the second attempt, doubled each time
 
 
 class LoginError(RuntimeError):
@@ -70,8 +72,7 @@ class ggpClient:
 
     def select(self):
         """The downloadable rows that match this client's filters."""
-        return db.select(self.con, self.project, self.round, self.wave, self.country, self.ids,
-                         self.all_versions, downloadable=True)
+        return db.select(self.con, **{f: getattr(self, f) for f in filters.FIELDS}, downloadable=True)
 
     async def __aenter__(self):
         return self
@@ -249,6 +250,52 @@ class ggpClient:
         return await consolidate.consolidate_async(self.rows if rows is None else rows, self.downloads,
                                                    self.processed, self.consolidated, self.force)
 
+    async def _download(self, r, part, stem):
+        """Stream the file of row r to `part`; returns (file name, bytes).
+
+        A transfer that is cut short, a dropped connection or a server error is tried again, RETRIES times in all.
+        Cut short means fewer bytes than the server announced (Content-Length). Fewer bytes than the catalogue's
+        size_mb is tried again too, but if it stays that way the file is kept with a warning: the catalogue's sizes
+        are rounded, and a file the server delivers whole is not wrong because of a note on a web page.
+        """
+        expected = (r["size_mb"] or 0) * 1e6 * 0.95 - 1e5  # a lower bound of the size the catalogue promises
+        for attempt in range(1, RETRIES + 1):
+            size, problem, cut = 0, None, False
+            try:
+                async with self.sem, self.client.stream("GET", r["url"]) as resp:
+                    resp.raise_for_status()
+                    if "text/html" in resp.headers.get("content-type", ""):
+                        raise RuntimeError("got a web page instead of a file (no access to this dataset yet?)")
+                    disposition = Message()  # parses filename*=UTF-8''... and quoting, as mail headers do
+                    disposition["content-disposition"] = resp.headers.get("content-disposition", "")
+                    name = disposition.get_filename() or stem
+                    with open(part, "wb") as f:  # shortcut: blocking write per 64 KB chunk, use aiofiles if it ever matters
+                        async for chunk in resp.aiter_bytes(1 << 16):
+                            f.write(chunk)
+                            size += len(chunk)
+                    announced = int(resp.headers.get("content-length") or 0)
+                    cut = bool(announced) and not resp.headers.get("content-encoding") and size < announced
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code < 500:
+                    raise
+                problem = f"HTTP {e.response.status_code}"
+            except httpx.TransportError as e:
+                problem = type(e).__name__
+            else:
+                if cut:
+                    problem = "the transfer was cut short"
+                elif size < expected:
+                    problem = f"{size / 1e6:.1f} MB, the catalogue says {r['size_mb']} MB"
+                else:
+                    return name, size
+            if attempt == RETRIES:
+                if cut or size == 0:  # nothing usable
+                    raise RuntimeError(f"download failed: {problem}, {RETRIES} attempts")
+                log.warning("%s: %s; kept, the file came whole", r["slug"], problem)
+                return name, size
+            log.warning("%s: %s, attempt %d of %d", r["slug"], problem, attempt, RETRIES)
+            await asyncio.sleep(RETRY_WAIT * 2 ** (attempt - 1))
+
     async def _fetch(self, r, root, want, metadata, convert=()):
         stem = r["stem"] + (f"_{r['download_id']}" if r["n_files"] > 1 else "")
         ffs = r["project"] == "FFS"
@@ -258,18 +305,8 @@ class ggpClient:
         part = dest.with_name(stem + ".part")
         ok, size = False, 0
         try:
-            async with self.sem, self.client.stream("GET", r["url"]) as resp:
-                resp.raise_for_status()
-                if "text/html" in resp.headers.get("content-type", ""):
-                    raise RuntimeError("got a web page instead of a file (no access to this dataset yet?)")
-                disposition = Message()  # parses filename*=UTF-8''... and quoting, as mail headers do
-                disposition["content-disposition"] = resp.headers.get("content-disposition", "")
-                name = disposition.get_filename() or stem
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                with open(part, "wb") as f:  # shortcut: blocking write per 64 KB chunk, use aiofiles if it ever matters
-                    async for chunk in resp.aiter_bytes(1 << 16):
-                        f.write(chunk)
-                        size += len(chunk)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            name, size = await self._download(r, part, stem)
             if ffs:  # a conversion error fails this file, not the batch
                 n = await asyncio.to_thread(processing.unpack, part, name, dest, stem, want, metadata,
                                             convert, self.force, self.processed / rel)
