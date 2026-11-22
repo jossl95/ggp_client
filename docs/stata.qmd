@@ -1,0 +1,113 @@
+---
+title: "Using ggp-client from Stata"
+---
+
+Stata (version 16 and later) runs Python code from a do-file. So a do-file can download the GGP data with ggp-client,
+have it consolidated into one Stata file per round and wave, and go on with that file in the same run. This page
+shows how, for GGS-II; the [GGS-II article](ggs-ii.qmd) describes what the files hold.
+
+## Set up Stata's Python, once
+
+ggp-client needs Python 3.10 or later. In Stata, see which Python it uses, and pick another if needed:
+
+```stata
+python query                                   // the Python Stata uses, and its version
+python search                                  // the Pythons installed on this computer
+python set exec "/usr/local/bin/python3", permanently
+```
+
+`python set exec` has to come before Python is first used in a Stata session (else error r(7101)); `permanently`
+makes Stata remember it. On Windows the path looks like `"C:\Users\you\AppData\Local\Programs\Python\Python312\python.exe"`.
+
+Install ggp-client into that same Python, from a terminal (not from Stata):
+
+```bash
+/usr/local/bin/python3 -m pip install "git+https://github.com/jossl95/ggp_client"
+```
+
+Back in Stata, `python which ggp_client` says whether Stata's Python finds it.
+
+## Log in, once
+
+Downloading needs the access link the portal emails you. Outside Stata, ggp-client asks for it with a hidden prompt;
+Stata has no terminal for that prompt, so give the link as a global macro. Type it in the Command window, not in the
+do-file: the link works like a password.
+
+```stata
+global GGP_ACCESS_URL "https://www.ggp-i.org/..."   // the whole link from the email
+```
+
+The first download saves the session in `data/.session.json`, so later runs need no link while that session works
+(when it stops working, request a fresh link and set the global again). `macro drop GGP_ACCESS_URL` removes it from Stata's memory.
+
+## The do-file
+
+```stata
+version 16
+cd "~/projects/ggp"                       // ggp-client works in data/ under this folder
+
+python:
+import asyncio
+from sfi import Macro
+from ggp_client import consolidate, ggpClient, processing
+async def ggs_ii():
+    link = Macro.getGlobal("GGP_ACCESS_URL") or None
+    async with ggpClient(project="ggs", round=2, access_url=link) as p:
+        await p.sync()                                               # index the portal
+        await p.download(ext="dta")                                  # every GGS-II country, Stata files only
+        processing.preprocess(p.rows, p.downloads, p.processed, p.force)  # each file to parquet + meta.json
+        await p.consolidate()                                        # one dataset per wave
+        names = consolidate.groups(p.rows, p.downloads, p.processed)
+        for name in names:                                           # and each as a labelled .dta
+            consolidate.to_stata(p.consolidated / f"{name}.parquet", p.force)
+        return {name: (p.consolidated / f"{name}.dta").resolve() for name in names}
+for name, path in asyncio.run(ggs_ii()).items():
+    Macro.setLocal(name.replace("-", "_"), str(path))                # ggs-ii_w1 -> local ggs_ii_w1
+end
+
+use "`ggs_ii_w1'", clear
+describe, short
+tabulate ggp_country
+tabulate dem01                            // value labels are on: "Male", "Female", ...
+```
+
+Every step is kept: run the do-file again and existing downloads, parquet files and `.dta` files are reused, so it only
+does what is new (a new country, or a new version of a dataset). Everything is logged to `data/ggp_client.log`.
+
+What the Python part does:
+
+- `ggpClient(project="ggs", round=2)` chooses GGS-II; the [filters](getting-started.qmd#filters) work as in Python
+  (`country=["nl", "at"]` for two countries, `round=1` for GGS-I).
+- `asyncio.run(...)` runs the client, which is asynchronous.
+- The `.dta` files are `data/download/consolidated/ggs-ii_w1.dta` and so on: one per wave, all countries stacked, with
+  the harmonized variable and value labels. `Macro.setLocal` hands their paths to the do-file, as the locals
+  `ggs_ii_w1`, `ggs_ii_w2`, ...
+- Variable names are lower case (`dem01`), and the columns `ggp_country`, `ggp_wave`, `ggp_version` and `ggp_file` say
+  where each row came from.
+
+## Things to know about Python in a do-file
+
+- **Use `python:` with the colon.** Then a Python error stops the do-file with r(7102). Without the colon, the rest of
+  the block runs on and Stata is not told that anything went wrong.
+- **Keep functions and `with` blocks free of blank lines.** Stata runs a `python:` block as an interactive session,
+  line by line, and in an interactive session a blank line can end a block early. The do-file above has none.
+- **No `$` and no backtick quotes in the Python code.** Stata expands macros in every line first, so `$name` and
+  `` `name' `` are replaced before Python sees the line. (That is also how you can pass a Stata local *into* the code.)
+- **Use the client's in-process steps.** The do-file calls `processing.preprocess` and `consolidate.to_stata` instead
+  of `await p.preprocess()` and `to_stata_async`: those start worker processes from the program Python runs in, and
+  inside Stata that program is Stata, not Python. The in-process versions do the same work, one file at a time.
+- **Prefer a script for longer code.** Put the Python part in `get_ggs.py` (same code, without `python:` and `end`) and
+  run `python script get_ggs.py` from the do-file. In a script, blank lines and `$` are ordinary Python again, and
+  `Macro.setLocal` hands the paths to the do-file as before.
+
+## Memory
+
+GGS-II wave 1 is 185,660 rows and some 4,000 variables. Load only what you need:
+
+```stata
+use ggp_country ggp_wave dem01 dem02 using "`ggs_ii_w1'", clear
+```
+
+Or keep a smaller selection from Python: `ggpClient(project="ggs", round=2, country=["nl", "be"])` downloads and
+consolidates those two countries only (in a `data_dir` of its own, such as `ggpClient(..., data_dir="data_nl_be")`,
+so that the full consolidated files stay as they are).

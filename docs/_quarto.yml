@@ -16,6 +16,7 @@ website:
       - text: Articles
         menu:
         - ggs-ii.qmd
+        - stata.qmd
         - labels.qmd
         - contract.qmd
         - ffs.qmd

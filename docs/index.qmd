@@ -42,6 +42,7 @@ keeps everything it did in a log.
 
 - [Getting started](getting-started.qmd): install, log in, download.
 - [GGS-II: every country in one dataset per wave](ggs-ii.qmd): every GGS-II country in Stata format, consolidated to parquet.
+- [Using ggp-client from Stata](stata.qmd): download and consolidate from a do-file, then `use` the result.
 - [Variable and value labels](labels.qmd): putting labels on the data, the `meta.json` files, and how labels are harmonized.
 - [Reading the Family and Fertility Surveys (FFS)](ffs.qmd): fixed-width data with SPSS syntax, in SPSS, R and Python.
 - [Reference](reference.qmd): commands, Python API and the data folder.
