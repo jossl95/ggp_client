@@ -1,0 +1,47 @@
+---
+title: "ggp-client"
+subtitle: "Download, label and consolidate data from the GGP data portal"
+toc: false
+---
+
+**ggp-client** is a Python package and command line tool for the
+[GGP data portal](https://www.ggp-i.org) of the Generations and Gender Programme. It turns the portal's
+country-by-country downloads into analysis-ready data:
+
+1. **Index** every dataset on the portal into a local catalogue: GGS rounds 1 and 2, the Family and Fertility
+   Surveys (FFS), the Harmonized Histories and the Additional Datasets (the last two are only visible after login).
+2. **Download** the files you select, by project, round, wave and country, and unpack zip and 7z archives.
+3. **Preprocess** each data file (`.dta`, `.sav`, `.csv`, or FFS fixed-width `.dat` with its SPSS syntax) to
+   parquet, with its variable and value labels in a `meta.json` file.
+4. **Consolidate** the countries of each round and wave into one dataset, with one harmonized set of labels,
+   as parquet and as a labelled Stata file.
+
+```bash
+pip install -e .
+ggp-client sync
+ggp-client download    --project ggs --round 2 --ext dta
+ggp-client preprocess  --project ggs --round 2
+ggp-client consolidate --project ggs --round 2   # data/download/consolidated/ggs-ii_w1.parquet, ...
+```
+
+## Why
+
+The portal ships every country as a separate archive, in several formats and with labels that differ between
+countries. Working with all countries of a wave means downloading dozens of files by hand, reading Stata or SPSS
+files, and stacking them while keeping track of which labels apply. ggp-client does that once, reproducibly, and
+keeps everything it did in a log.
+
+## Built with
+
+[httpx](https://www.python-httpx.org) for the asynchronous downloads,
+[polars](https://pola.rs) for reading, preprocessing and consolidating (lazy and multi-threaded),
+[pyreadstat](https://github.com/Roche/pyreadstat) for Stata and SPSS files and their labels, and
+[py7zr](https://github.com/miurahr/py7zr) for 7z archives.
+
+## Where to next
+
+- [Getting started](getting-started.qmd): install, log in, download.
+- [Use case: GGS-II](ggs-ii.qmd): every GGS-II country in Stata format, consolidated to parquet.
+- [Labels](labels.qmd): the `meta.json` files and how labels are harmonized.
+- [FFS data](ffs.qmd): fixed-width data with SPSS syntax, in SPSS, R and Python.
+- [Reference](reference.qmd): commands, Python API and the data folder.

@@ -1,0 +1,32 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "ggp-client"
+  description: "Download, label and consolidate data from the GGP data portal."
+  site-url: https://jossl95.github.io/ggp_client/
+  repo-url: https://github.com/jossl95/ggp_client
+  repo-actions: [source, issue]
+  navbar:
+    left:
+      - href: index.qmd
+        text: Home
+      - getting-started.qmd
+      - ggs-ii.qmd
+      - labels.qmd
+      - ffs.qmd
+      - reference.qmd
+    right:
+      - icon: github
+        href: https://github.com/jossl95/ggp_client
+  page-footer:
+    center: "ggp-client is not affiliated with the Generations and Gender Programme. The data stays subject to the GGP terms of use."
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    toc: true
+    code-copy: true

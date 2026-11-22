@@ -1,0 +1,62 @@
+---
+title: "Reference"
+---
+
+## Commands
+
+| command | does |
+|---|---|
+| `ggp-client sync` | index the portal into `data/catalogue.sqlite` (`--dump DIR` keeps the raw pages) |
+| `ggp-client list` | show the selected datasets and whether they are downloaded |
+| `ggp-client download` | download and unpack (`--ext`, `--metadata`, `--force`, `--concurrency`, `--access-url`) |
+| `ggp-client preprocess` | data files to parquet + meta.json (`--force`, `--concurrency`) |
+| `ggp-client consolidate` | one dataset per round and wave (`--force`) |
+| `ggp-client convert X.SPS` | convert one FFS dataset to sav, dta or csv (`--ext`, `--force`) |
+
+All but `sync` and `convert` take the [filters](getting-started.qmd#filters). `--data-dir` (default `data`)
+goes before the command: `ggp-client --data-dir elsewhere list`. `ggp-client <command> --help` lists every option.
+
+## Python
+
+### `ggpClient`
+
+```python
+ggpClient(data_dir="data", access_url=None, concurrency=8, project=None, round=None, wave=None,
+          country=None, ids=None, all_versions=False, force=False)
+```
+
+Use it as `async with ggpClient(...) as p:`. It opens the catalogue as `p.con` and keeps the rows the filters
+select in `p.rows`. Its methods are async and return `(done, skipped, failed)` unless noted:
+
+| method | does |
+|---|---|
+| `await p.sync()` | index the portal; returns `(found, failed)` |
+| `await p.login()` | saved session, else the access link |
+| `await p.download(rows=None, ext=None, metadata=False)` | download `p.rows` (or `rows`) |
+| `await p.preprocess(rows=None)` | to parquet + meta.json, in worker processes |
+| `await p.consolidate(rows=None)` | stack per round and wave, with harmonized labels |
+
+### Modules
+
+| module | main functions |
+|---|---|
+| `ggp_client.read` | `read(path)`, `scan(path)` (LazyFrame), `read_async(path)`, `read_all_async(paths)`, `meta(path)`: dta, sav, csv, parquet and FFS `.sps` into polars |
+| `ggp_client.processing` | `preprocess` / `preprocess_async` (to parquet), FFS: `read_ffs`, `convert`, `write` |
+| `ggp_client.consolidate` | `consolidate` / `consolidate_async`, `merged_meta` (harmonized labels), `to_stata` / `to_stata_async` |
+
+Every module has a plain and an async version; the client uses the async ones. Scripts that call the async
+versions need `if __name__ == "__main__":`, because worker processes re-import the script. The docstrings in the
+code describe every function in detail.
+
+## The data folder
+
+```
+data/
+├── catalogue.sqlite        datasets and files; ids never change
+├── .session.json           your login session (mode 600)
+├── ggp_client.log          every sync, download and step, with time stamps
+└── download/
+    ├── raw/                downloads, unpacked: <series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/
+    ├── processed/          parquet + meta.json per data file; FFS conversions
+    └── consolidated/       <series>_<wave>.parquet, .meta.json and .dta
+```

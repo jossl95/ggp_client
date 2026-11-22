@@ -4,6 +4,8 @@ Download data from the [GGP data portal](https://www.ggp-i.org) (Generations and
 and 2, FFS, Harmonized Histories and Additional Datasets. It indexes the portal, downloads and unpacks the files,
 converts them to parquet with their labels, and stacks the countries of each round and wave into one dataset.
 
+Documentation: **https://jossl95.github.io/ggp_client/** (source in [`docs/`](docs/), built with Quarto).
+
 ## Getting started
 
 ```bash

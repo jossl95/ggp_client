@@ -1,0 +1,70 @@
+---
+title: "Labels"
+---
+
+Parquet holds values, not labels. ggp-client keeps the labels of every `.dta` and `.sav` file, as pyreadstat reads
+them, in a `meta.json` next to its parquet file.
+
+## Using them
+
+```python
+import json
+import polars as pl
+
+df = pl.read_parquet("data/download/consolidated/ggs-ii_w1.parquet")
+meta = json.load(open("data/download/consolidated/ggs-ii_w1.meta.json", encoding="utf-8"))
+
+meta["column_labels"]["dem01"]   # 'Gender'                                    variable -> variable label
+meta["value_labels"]["dem01"]    # {'1': 'Male', '2': 'Female', '3': 'Other', ...}  variable -> value -> label
+
+df.select(pl.col("dem01").cast(pl.Int64).cast(pl.String).replace(meta["value_labels"]["dem01"]))
+```
+
+JSON keys are text, so codes are `"1"`, not `1`. To hand labels back to pyreadstat:
+
+```python
+import pyreadstat
+
+labels = {int(k): v for k, v in meta["value_labels"]["dem01"].items() if k.lstrip("-").isdigit()}
+pyreadstat.write_dta(df.select("dem01"), "gender.dta", variable_value_labels={"dem01": labels},
+                     column_labels=[meta["column_labels"]["dem01"]])
+```
+
+Letter codes such as `"b"` are Stata's extended missing values (`.b`); pyreadstat reads those cells as missing.
+
+## Per-file meta.json
+
+| key | content |
+|---|---|
+| `file` | the source file, under `download/raw` |
+| `file_label` | the file's own label |
+| `column_labels` | `{variable: label}` |
+| `value_labels` | `{variable: {value: label}}` |
+| `missing_ranges` | `.sav` only: the values SPSS treats as missing |
+| `original_types` | the Stata or SPSS display format of each variable |
+
+## Consolidated meta.json: harmonized labels
+
+Countries label the same variable and the same values differently: "Czechia" or "Czech Republic", or `region` 1
+meaning "East Austria" in one country and "East Midlands" in another. The consolidated `meta.json` has one
+harmonized set:
+
+- **One vote per country**, that of its first file (Belarus ships GGS-II wave 1 in English and in Russian; the
+  English file votes). Harmonized Histories and Additional Datasets, which have no country, vote per file.
+- **Every variable has one label**: the one most countries use (`respid`: "Respondent ID").
+- **Every value has exactly one label**: the one more than half of the countries use (ISO 203: "Czechia"). With
+  no majority, all labels are joined into one, most used first (`region` 1: "East Austria / East Midlands /
+  Pannonian Croatia / ..."). Spelling and case variants count as the same label.
+- **Several values may share a label**: `dem07` 2102 (Austria) and 3103 (Croatia) are both "Elementary school".
+- **Codes are never changed**: the data is exactly what each country delivered.
+- **`original_labels`** lists, for every value labelled differently in any file, each wording and the files
+  that use it:
+
+```json
+"intdatem": {"c": {"Don't know": ["ggs-ii/w1/by/.../GGP2020_WAVE1_BLR_V_1_0.dta", "..."],
+                   "Не знаю": ["ggs-ii/w1/by/.../GGP2020_WAVE1_BLR_V_1_0_RU.dta"]}}
+```
+
+The labelled Stata files written by `download_ggs.py` (`consolidate.to_stata`) use these same labels. Stata
+attaches value labels to whole numbers only, so they go on integer columns and on decimal columns that hold only
+whole numbers.
