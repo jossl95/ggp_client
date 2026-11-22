@@ -6,17 +6,23 @@ converts them to parquet with their labels, and stacks the countries of each rou
 
 Documentation: **https://jossl95.github.io/ggp_client/** (source in [`docs/`](docs/), built with Quarto).
 
+This is the Python version. The R package [ggpclientR](https://github.com/jossl95/ggpclientR)
+([docs](https://jossl95.github.io/ggpclientR/)) does the same steps, with the same folders and the same files, without
+Python.
+
 ## Getting started
 
 ```bash
-pip install -e .
+pip install "git+https://github.com/jossl95/ggp_client"
 ggp-client sync                                  # index the portal into data/catalogue.sqlite
-ggp-client list --project ggs --round 2          # what is there (the same filters work for every command)
+ggp-client list --project ggs --round 2          # what is there: one row per file (the same filters work everywhere)
 ```
 
-Downloading needs the access link the portal emails you. The first download asks you to paste it (the input is
-hidden), then the session is saved in `data/.session.json` and reused. The link is valid for seven days and is only asked for, never kept: there is no environment variable for it.
-Treat the link like a password: do not commit it or pass it on the command line, where it stays in your history.
+Downloading needs the access link the portal e-mails you. The first download asks you to paste it (the input is
+hidden), then the session is saved in `data/.session.json` and reused; syncing and downloading log in by themselves when
+needed. The link is valid for seven days, so it is only asked for: there is no environment variable for it, and it is
+never stored or logged. Treat it like a password: do not commit it or pass it on the command line, where it stays in
+your history.
 
 ## Use case: GGS-II in Stata format, consolidated to parquet
 
@@ -86,9 +92,23 @@ The consolidated labels are harmonized over the countries, each country voting o
 - codes are never changed;
 - `original_labels` lists, for every value countries label differently, each wording and the files that use it.
 
+## Reading data: polars or pandas, async
+
+- `read("file.dta")` (also `.sav`, `.csv`, `.parquet` and an FFS `.sps` with its `.dat`) returns a polars DataFrame
+  with the codes; `read(path, "pandas")` gives pandas. `meta(path)` gives the variable and value labels of a `.dta` or
+  `.sav`. In `.sav`, values SPSS marks as missing are null.
+- `scan("file.parquet")` opens a big file as a polars LazyFrame, without reading it.
+- `await read_async(path)` and `await read_all_async(paths, concurrency=4)` read in worker processes, several files at
+  once.
+
+```python
+from ggp_client.read import read, scan, meta
+
+df = read("data/download/consolidated/ggs-ii_w1.parquet")
+```
+
 ## Other data
 
-- **R**: use the native R package [ggpclientR](https://github.com/jossl95/ggpclientR) (`pak::pak("jossl95/ggpclientR")`, [docs](https://jossl95.github.io/ggpclientR/)).
 - **FFS** comes as fixed-width `.dat` with SPSS syntax (`.sps`) and frequency tables (`.tbl`), kept in
   `download/raw/ffs/<cc>/`. The download also converts it, with labels, to `download/processed/ffs/<cc>/converted_data.dta`
   (`--ext sav` for `.sav`). In SPSS you can run the `.sps` itself. One dataset by hand: `ggp-client convert AUSTRIA.SPS --ext dta`.
@@ -99,9 +119,11 @@ The consolidated labels are harmonized over the countries, each country voting o
 
 ## Good to know
 
-- Nothing is downloaded or written twice: existing files are kept. `--force` redoes everything, and replaces datafiles saved earlier under an uppercase name (`download --force`, then `preprocess --force`). A consolidated
-  file is rebuilt by itself when its countries or input files change.
+- Nothing is downloaded or written twice: existing files are kept. `--force` redoes everything, and replaces
+  datafiles saved earlier under an uppercase name (`download --force`, then `preprocess --force`). A consolidated file
+  is rebuilt by itself when its countries or input files change.
 - Every step is logged to `data/ggp_client.log`. The access link never is.
+- The login is shared with the R package: `data/.session.json` is read, and written after a login.
 - Three GGS-I files (Australia waves 1 and 2, Norway wave 1) give "404 Not Found" on the portal itself.
 - GGS-II Belarus wave 1 comes in English and Russian: it is in the consolidated file twice. Filter on `ggp_file`.
 - Labelled Stata files are large (GGS-II wave 1: 3.3 GB, against 36 MB as parquet); `compress` in Stata helps.
