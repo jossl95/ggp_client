@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-import shutil
 from dataclasses import dataclass, field
 from email.message import Message
 from pathlib import Path
@@ -215,7 +214,8 @@ class ggpClient:
         async def one(r):
             nonlocal done, skipped
             k = ({"raw"} | set(convert) | meta) if r["project"] == "FFS" else kept
-            there = bool(r["local_path"]) and (root / r["local_path"]).exists()
+            lp = r["local_path"]
+            there = bool(lp) and any((root / lp).parent.glob(Path(lp).name + "*"))  # its files, or its old folder
             prev = set((r["fetched"] or "").split()) if there else set()  # a deleted folder holds nothing
             if not self.force and there and k <= prev:
                 skipped += 1
@@ -298,25 +298,18 @@ class ggpClient:
 
     async def _fetch(self, r, root, want, metadata, convert=()):
         stem = r["stem"] + (f"_{r['download_id']}" if r["n_files"] > 1 else "")
-        ffs = r["project"] == "FFS"
-        rel = r["rel_dir"] if ffs else f"{r['rel_dir']}/{stem}"  # FFS: one dataset per country, no folder of its own
-        dest = root / rel
-        existed = dest.exists()  # a failed fetch must not delete what an earlier one unpacked
+        dest = root / r["rel_dir"]  # the country folder: its files are named after the dataset, <stem>.dta
         part = dest.with_name(stem + ".part")
-        ok, size = False, 0
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             name, size = await self._download(r, part, stem)
-            if ffs:  # a conversion error fails this file, not the batch
+            if r["project"] == "FFS":  # a conversion error fails this file, not the batch
                 n = await asyncio.to_thread(processing.unpack, part, name, dest, stem, want, metadata,
-                                            convert, self.force, self.processed / rel)
+                                            convert, self.force, self.processed / r["rel_dir"])
             else:
-                n = await asyncio.to_thread(extract.unpack_file, part, name, dest, want, metadata, self.force)
-            ok = n > 0
+                n = await asyncio.to_thread(extract.unpack_dataset, part, name, dest, stem, want, metadata, self.force)
         finally:
             part.unlink(missing_ok=True)
-            if not (ok or existed):
-                shutil.rmtree(dest, ignore_errors=True)
-        if not ok:
+        if not n:
             raise RuntimeError(f"no matching files in the archive (looked for {', '.join(sorted(want))})")
-        return rel, n, size
+        return f"{r['rel_dir']}/{stem}", n, size

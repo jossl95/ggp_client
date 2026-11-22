@@ -63,12 +63,16 @@ def parse_slug(slug):
 
 
 def naming(p, slug, version):
-    """Folder and file stem, both lowercase, e.g. ('ggs-ii/w1/at', 'ggs2_w1_at_v1.1')."""
+    """Folder and file stem, both lowercase, e.g. ('ggs-ii/w1/at', 'ggs2_w1_at_v1.1').
+
+    A wave that adds a name to a wave or the pilot gets a folder in it: w2pilot is w2/pilot, pilotfollowup pilot/followup.
+    """
     v = f"_v{version}" if version else ""
     if p["key"] is None:
         return "other", slug + v
     stem = "_".join(x for x in (p["key"], p["wave"], p["country"].lower()) if x) + v
-    return "/".join(x for x in (p["series"], p["wave"], p["country"]) if x).lower(), stem
+    wave = re.sub(r"^(w\d+|pilot)(?=[a-z])", r"\1/", p["wave"])
+    return "/".join(x for x in (p["series"], wave, p["country"]) if x).lower(), stem
 
 
 def sort_key(slug):

@@ -78,3 +78,17 @@ def test_consolidating_into_a_folder_with_brackets(tmp_path):
     consolidate._done(out, "ggs-ii_w1", [(tmp_path / "at.parquet", "AT", "at.dta")])
     assert pl.read_parquet(out / "ggs-ii_w1.parquet", glob=False)["age"].to_list() == [30]
     assert json.loads((out / "ggs-ii_w1.meta.json").read_text())["column_labels"] == {}
+
+
+def test_wave_folders_and_files_named_after_the_dataset(tmp_path):
+    from ggp_client import parse
+    folder = lambda slug: parse.naming(parse.parse_slug(slug), slug, "1.0")[0]
+    assert folder("ggs2-ee-wave2pilot") == "ggs-ii/w2/pilot/ee"
+    assert folder("ggs2-se-wave1register") == "ggs-ii/w1/register/se"
+    assert folder("ggs2-cz-pilotfollowup") == "ggs-ii/pilot/followup/cz"
+    assert folder("ggs2-cz-pilot") == "ggs-ii/pilot/cz" and folder("ggs2-at-wave1") == "ggs-ii/w1/at"
+    cz = tmp_path / "ggs-ii/pilot/cz"  # two versions side by side: each row takes its own files
+    cz.mkdir(parents=True)
+    for name in ("ggs2_pilot_cz_v0.3.dta", "ggs2_pilot_cz_v0.3.sav", "ggs2_pilot_cz_v0.2.dta"):
+        (cz / name).write_bytes(b"x")
+    assert [p.name for p in processing.own_files(tmp_path, "ggs-ii/pilot/cz/ggs2_pilot_cz_v0.3")] == ["ggs2_pilot_cz_v0.3.dta"]

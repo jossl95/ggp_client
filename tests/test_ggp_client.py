@@ -284,12 +284,12 @@ def test_sync_download_select(tmp_path):
     with pytest.raises(ValueError, match="unknown country"):
         db.select(con, country=["nl", "xx"])
 
-    # default download: datafiles only, in a folder per file, zip contents and nested zips mirrored
+    # default download: datafiles only, in the country folder, named after the dataset
     assert (done, skipped) == (5, 0)
     assert [b[0] for b in bad] == ["ggs2-nl-wave1"] and "web page" in bad[0][1]
-    at_dir = tmp_path / "dl/ggs-ii/w1/at/ggs2_w1_at_v1.1"
+    at_dir = tmp_path / "dl/ggs-ii/w1/at"
     ffs_dir, conv_dir = tmp_path / "dl/ffs/us", tmp_path / "download/processed/ffs/us"
-    assert tree(at_dir) == ["data/at_w1.dta", "data/at_w1.sav"]
+    assert tree(at_dir) == ["ggs2_w1_at_v1.1.dta", "ggs2_w1_at_v1.1.sav"]
     assert tree(ffs_dir) == ["ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]  # FFS: raw here
     assert tree(conv_dir) == ["converted_data.dta"]  # and converted (dta by default) in download/processed
     sps = (ffs_dir / "ffs_us_v1.0.sps").read_bytes().decode("latin-1")  # rewritten: names with _, FILE= the new .dat
@@ -297,7 +297,7 @@ def test_sync_download_select(tmp_path):
     assert "V004_01  15-16" in sps and "\r\n V005_01\r\n" in sps and '"Caseweight in US$"' in sps
     assert "$01" not in sps
     assert (ffs_dir / "ffs_us_v1.0.tbl").read_bytes() == b"TABLE 4 BY IND01_01\r\nincome US$ 100\r\n"  # names only
-    assert (at_dir / "data/at_w1.dta").read_bytes() == b"dta"
+    assert (at_dir / "ggs2_w1_at_v1.1.dta").read_bytes() == b"dta"
     assert tuple(con.execute("SELECT local_path, fetched FROM file WHERE download_id=95").fetchone()) == (
         "ggs-ii/w1/at/ggs2_w1_at_v1.1", "csv dta sav")
     assert not list(tmp_path.rglob("*.part"))
@@ -313,22 +313,22 @@ def test_sync_download_select(tmp_path):
         return asyncio.run(go())
 
     assert tree(tmp_path / "dl/hh/harmonized-histories") == [
-        "hh_harmonized-histories_1/x.dta", "hh_harmonized-histories_84/x.dta"]  # two files: a folder each
-    assert tree(tmp_path / "dl/other/nkps") == ["other_nkps/x.dta"]
+        "hh_harmonized-histories_1.dta", "hh_harmonized-histories_84.dta"]  # two files: the download id tells them apart
+    assert tree(tmp_path / "dl/other/nkps") == ["other_nkps.dta"]
     assert again() == (0, 5)  # same request: nothing to do
     assert again(ext="dta") == (0, 5)  # a subset for the others; FFS already has its dta
     assert again(ext="csv") == (0, 5)  # FFS converts to dta or sav only: csv means its default dta
     assert again(ext="sav") == (1, 4)  # FFS converted to sav as well
     assert tree(conv_dir) == ["converted_data.dta", "converted_data.sav"]
-    (at_dir / "data/at_w1.dta").write_bytes(b"my edits")
+    (at_dir / "ggs2_w1_at_v1.1.dta").write_bytes(b"my edits")
     assert again(metadata=True) == (5, 0)
-    assert (at_dir / "data/at_w1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept
-    assert tree(at_dir) == ["data/at_w1.dta", "data/at_w1.sav", "docs/Codebook.pdf"]
+    assert (at_dir / "ggs2_w1_at_v1.1.dta").read_bytes() == b"my edits"  # fetched again for the docs: existing file kept
+    assert tree(at_dir) == ["ggs2_w1_at_v1.1.dta", "ggs2_w1_at_v1.1.sav", "ggs2_w1_at_v1.1/docs/Codebook.pdf"]  # documents: a folder
     assert tree(ffs_dir) == ["docs/readme.txt", "ffs_us_v1.0.dat", "ffs_us_v1.0.sps", "ffs_us_v1.0.tbl"]
     assert not list(ffs_dir.parent.glob(".unpack-*"))  # the temporary folder is gone
     assert again(metadata=True) == (0, 5)
     assert again(force=True) == (5, 0)  # force: everything again, existing files overwritten
-    assert (at_dir / "data/at_w1.dta").read_bytes() == b"dta"
+    assert (at_dir / "ggs2_w1_at_v1.1.dta").read_bytes() == b"dta"
     shutil.rmtree(ffs_dir)  # raw files deleted by hand: downloaded again
     assert again() == (1, 4) and again(ext="dta") == (0, 5)  # no ext converts to dta too
     assert "ffs_us_v1.0.dat" in tree(ffs_dir) and "converted_data.dta" in tree(conv_dir)
@@ -339,7 +339,7 @@ def test_sync_download_select(tmp_path):
     assert "INFO login: logged in with the access link" in text and "INFO login: saved session reused" in text
     assert "INFO downloaded ggs2-at-wave1: " in text and "files kept in ggs-ii/w1/at/ggs2_w1_at_v1.1" in text
     assert "ERROR failed ggs2-nl-wave1: got a web page" in text
-    assert "INFO skipped ffs-us-thefamilyandfertilitysurvey: already in ffs/us" in text
+    assert "INFO skipped ffs-us-thefamilyandfertilitysurvey: already in ffs/us/ffs_us_v1.0" in text
     assert "s3cr3t" not in text
     assert not logging.getLogger("ggp_client").handlers  # each client removes its file handler on exit
 
@@ -534,7 +534,7 @@ def test_download_ggs_script(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "download: 1 done, 0 skipped (already there), 1 failed" in out and "failed: download: ggs2-nl-wave1" in out
     assert "stata: 1 done" in out
-    assert tree(tmp_path / "download/raw") == ["ggs-ii/w1/at/ggs2_w1_at_v1.1/data/at_w1.dta"]  # GGS only, dta only
+    assert tree(tmp_path / "download/raw") == ["ggs-ii/w1/at/ggs2_w1_at_v1.1.dta"]  # GGS only, dta only
     cons = tmp_path / "download/consolidated"
     assert tree(cons) == ["ggs-ii_w1.dta", "ggs-ii_w1.meta.json", "ggs-ii_w1.parquet"]
     meta = json.loads((cons / "ggs-ii_w1.meta.json").read_text())

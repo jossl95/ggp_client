@@ -15,8 +15,8 @@ csv has the codes only: it cannot hold labels. The converted files have lower-ca
 Preprocessing saves downloaded datafiles as parquet under data_dir/download/processed, with columns that say
 where each row came from. One parquet per data file, at the same path as in download/raw, plus a .meta.json with
 its labels (dta and sav):
-download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/ggsii_wave1_at_v_1_1.dta ->
-    download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/ggsii_wave1_at_v_1_1.parquet and ggsii_wave1_at_v_1_1.meta.json
+download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1.dta ->
+    download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1.parquet and ggs2_w1_at_v1.1.meta.json
 A file that comes in several types (dta, sav and csv of one dataset) is read once, in the order of read.FORMATS.
 FFS is read from its converted_data.dta/.sav, which the download puts in download/processed/ffs/<cc>/ already;
 a country without one is read from the raw .sps/.dat.
@@ -45,7 +45,6 @@ log = logging.getLogger("ggp_client")
 FORMATS = ("sav", "dta", "csv")
 CONVERTED = "converted_data"
 RAW = {"dat", "sps", "tbl", "sav"}  # always kept; .sav because Estonia ships those instead of a .sps
-DATA_FILES = {".dat", ".sps", ".tbl", ".sav", ".dta", ".csv"}  # renamed after the dataset; documents keep their names
 SECTION = re.compile(r"^(DATA LIST|VARIABLE LABELS?|VALUE LABELS?|MISSING VALUES?)\b(.*)$", re.I)
 # a label runs to the last quote on its line: some files have stray quotes where umlauts were ("Nieder"sterreich")
 TOKEN = re.compile(r'"[^\n]*"|\'[^\n]*\'|\([^)]*\)|/|[^\s/()"\']+')
@@ -327,14 +326,7 @@ def unpack(archive, filename, dest, stem, ext, metadata, convert_to=(), force=Fa
             sps.write_bytes(rewrite_sps(sps.read_bytes().decode("latin-1"), dat).encode("latin-1"))  # keeps CRLF
         for tbl in (p for p in files if p.suffix.lower() == ".tbl"):  # report text: only a $ between name characters
             tbl.write_bytes(re.sub(rb"(?<=[A-Za-z0-9])\$(?=[A-Za-z0-9])", b"_", tbl.read_bytes()))
-        for p in files:
-            rel, s = p.relative_to(tmp), p.suffix.lower()
-            if s in DATA_FILES:
-                rel = rel.with_name(f"{stem}{s}" if count[s] == 1 else f"{stem}_{p.stem.lower()}{s}")
-            target = dest / rel
-            if force or not target.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(p, target)
+        extract.place(tmp, dest, stem, dest, force)
     return n
 
 
@@ -354,16 +346,29 @@ def datafiles(folder, types=read.FORMATS):
     return sorted(best.values())
 
 
+def own_files(root, lp):
+    """The datafiles of a download: lp is <country folder>/<file stem>, its files <stem>.dta, <stem>_x.dta, ...
+
+    A folder of its own (downloads of older versions) holds all its files.
+    """
+    p = Path(root) / lp
+    if p.is_dir():
+        return datafiles(p)
+    # shortcut: a stem without version (ggs2_w1_at) also takes ggs2_w1_at_v1.0.*; the portal gives every dataset one
+    return [f for f in datafiles(p.parent) if f.stem.lower() == p.name or f.stem.lower().startswith(p.name + "_")]
+
+
 def sources(r, root, out):
     """[(data file, its path under root or out)] of row r; none if it is not downloaded.
 
     FFS: its converted dta/sav in out (download/processed) when there are any, else the raw files under root.
     """
     root, out, lp = Path(root), Path(out), r["local_path"]
-    if not lp or not (root / lp).exists():
+    if not lp:
         return []
-    conv = [p for p in datafiles(out / lp, read.LABELLED) if p.name.lower().startswith(CONVERTED)]
-    return [(p, p.relative_to(out if conv else root)) for p in conv or datafiles(root / lp)]
+    folder = out / lp if (root / lp).is_dir() else (out / lp).parent
+    conv = [p for p in datafiles(folder, read.LABELLED) if p.name.lower().startswith(CONVERTED)]
+    return [(p, p.relative_to(out if conv else root)) for p in conv or own_files(root, lp)]
 
 
 def jobs(rows, root, out, force=False):

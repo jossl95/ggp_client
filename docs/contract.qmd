@@ -10,7 +10,8 @@ implementations of one contract: a file written by one is read by the other. Thi
 ```
 data/catalogue.sqlite                         the same schema (tables dataset and file)
 data/.session.json                            the login: [{name, value, domain, path}], mode 600
-data/download/raw/<series>/<wave>/<cc>/<stem>/...   lower-case folders and datafile names
+data/download/raw/<series>/<wave>/<cc>/<stem>.<ext> datafiles named after the dataset (ggs2_w1_at_v1.1.dta),
+                                             documents in <cc>/<stem>/; w2pilot is the folder w2/pilot
 data/download/processed/.../<file>.parquet    + <file>.meta.json
 data/download/consolidated/<series>_<wave>.parquet  + .meta.json  (+ .dta)
 ```

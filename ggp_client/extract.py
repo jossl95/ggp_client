@@ -1,4 +1,5 @@
 """Unpack downloaded archives: keep the datafiles asked for, mirror nested archives as nested folders."""
+import collections
 import os
 import shutil
 import tempfile
@@ -10,6 +11,7 @@ import py7zr
 from . import parse
 
 DATA_EXT = ("dta", "sav", "csv")
+NAMED = {".dta", ".sav", ".csv", ".dat", ".sps", ".tbl"}  # named after the dataset; documents keep their names
 ARCHIVE_EXT = ("zip", "7z")  # the portal serves both, and some ".7z" files are really zips: content decides
 MAX_DEPTH = 5  # shortcut: no cap on unpacked size, fine for archives from the portal; add one if that changes
 
@@ -131,3 +133,35 @@ def unpack_file(path, name, dest, ext, metadata, force=False):
         with open(path, "rb") as src:
             _write(src, dest / fname)
     return 1
+
+
+def place(tmp, dest, stem, docs, force=False):
+    """Move what was unpacked in tmp: datafiles into dest, named after the dataset (<stem>.dta, or <stem>_<name>.dta
+    when there are several of one type), and the other files (documents) into docs, keeping their paths.
+
+    A file that already exists is kept unless force.
+    """
+    files = sorted(p for p in Path(tmp).rglob("*") if p.is_file())
+    count = collections.Counter(p.suffix.lower() for p in files)
+    for p in files:
+        s = p.suffix.lower()
+        if s in NAMED:  # shortcut: two datafiles of one name in different folders of an archive keep only the first
+            target = Path(dest) / (f"{stem}{s}" if count[s] == 1 else f"{stem}_{p.stem.lower()}{s}")
+        else:
+            target = Path(docs) / p.relative_to(tmp)
+        if force or not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(p, target)
+
+
+def unpack_dataset(path, name, dest, stem, ext, metadata, force=False):
+    """Unpack a download into dest, the country folder: datafiles as <stem>.<ext>, documents in dest/<stem>/.
+
+    Returns the number of matching files; with none, nothing is written.
+    """
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=dest.parent, prefix=".unpack-") as tmp:
+        n = unpack_file(path, name, Path(tmp), ext, metadata, force=True)
+        place(tmp, dest, stem, dest / stem, force)
+    return n

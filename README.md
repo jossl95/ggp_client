@@ -40,6 +40,7 @@ from ggp_client import ggpClient
 
 async def main():
     async with ggpClient(project="ggs", round=2) as p:
+        await p.login()
         await p.sync()
         await p.download(ext="dta")
         await p.preprocess()
@@ -52,9 +53,9 @@ if __name__ == "__main__":  # needed: preprocessing runs in worker processes
 Result, in `data/`:
 
 ```
-download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/.../ggsii_wave1_at_v_1_1.dta          as downloaded
-download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/.../ggsii_wave1_at_v_1_1.parquet one file as parquet
-download/processed/.../ggsii_wave1_at_v_1_1.meta.json                           its labels
+download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1.dta                as downloaded, named after the dataset
+download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1.parquet      one file as parquet
+download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1.meta.json    its labels
 download/consolidated/ggs-ii_w1.parquet                                         all countries of wave 1
 download/consolidated/ggs-ii_w1.meta.json                                       their harmonized labels
 ```

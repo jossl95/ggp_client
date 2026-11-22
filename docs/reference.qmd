@@ -57,7 +57,7 @@ data/
 ├── .session.json           your login session (mode 600)
 ├── ggp_client.log          every sync, download and step, with time stamps
 └── download/
-    ├── raw/                downloads, unpacked: <series>/<wave>/<cc>/<key>_<wave>_<cc>_v<version>/
+    ├── raw/                downloads: <series>/<wave>/<cc>/<stem>.dta, documents in <cc>/<stem>/
     ├── processed/          parquet + meta.json per data file; FFS conversions
     └── consolidated/       <series>_<wave>.parquet, .meta.json and .dta
 ```
