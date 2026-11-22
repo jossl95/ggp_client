@@ -355,6 +355,9 @@ def jobs(rows, root, out, force=False):
             if not force and target.exists() and (src.suffix.lower() not in read.LABELLED or _meta(target).exists()):
                 skipped += 1
             else:
+                if force:  # the parquet and meta of an older, differently cased name would stay behind
+                    extract.drop_case_variants(target)
+                    extract.drop_case_variants(_meta(target))
                 todo.append((src, rel, target, r))
     return todo, skipped
 

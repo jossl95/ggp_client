@@ -239,6 +239,11 @@ def test_plain_file_is_kept_only_if_it_matches(tmp_path):
     assert (tmp_path / "o/at.dta").read_bytes() == b"d"
     assert extract.unpack_file(f, "AT.dta", tmp_path / "o", {"dta"}, False, force=True) == 1
     assert (tmp_path / "o/at.dta").read_bytes() == b"new"
+    (tmp_path / "o/AT.dta").write_bytes(b"old name")  # downloaded before names were lower-cased
+    extract.unpack_file(f, "AT.dta", tmp_path / "o", {"dta"}, False)
+    assert tree(tmp_path / "o") == ["AT.dta", "at.dta"]  # kept without force
+    extract.unpack_file(f, "AT.dta", tmp_path / "o", {"dta"}, False, force=True)
+    assert tree(tmp_path / "o") == ["at.dta"]
 
 
 def test_sync_download_select(tmp_path):

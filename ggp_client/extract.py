@@ -33,6 +33,14 @@ def _fname(name):
     return name.lower() if _suffix(name) in DATA_EXT else name
 
 
+def drop_case_variants(target):
+    """Delete the files next to target that differ from it only in case: the old names of a datafile."""
+    if target.parent.is_dir():
+        for p in target.parent.iterdir():
+            if p.name != target.name and p.name.lower() == target.name.lower():
+                p.unlink()
+
+
 def _parts(name):
     """Archive member path as folder/file parts, or None if it could escape the target folder."""
     p = PurePosixPath(name.replace("\\", "/"))
@@ -82,7 +90,7 @@ def unpack(path, dest, ext, metadata, force=False, depth=0):
     """Extract the wanted members of the archive at path into dest; a nested archive becomes a folder named after it.
 
     Folder and datafile names are lowercased, other file names are kept. A file that already exists is left as it is
-    unless force. Returns the number of matching files (written or already there).
+    unless force, which also removes the same datafile saved under an old, differently cased name. Returns the number of matching files (written or already there).
     """
     n = 0
     for parts, opener in _members(path, ext, metadata):
@@ -100,6 +108,8 @@ def unpack(path, dest, ext, metadata, force=False, depth=0):
             target = folder / _fname(fname)
             if force or not target.exists():
                 folder.mkdir(parents=True, exist_ok=True)
+                if force and suffix in DATA_EXT:
+                    drop_case_variants(target)
                 with opener() as src:
                     _write(src, target)
             n += 1
@@ -116,6 +126,8 @@ def unpack_file(path, name, dest, ext, metadata, force=False):
         return 0
     if force or not (dest / fname).exists():
         dest.mkdir(parents=True, exist_ok=True)
+        if force:
+            drop_case_variants(dest / fname)
         with open(path, "rb") as src:
             _write(src, dest / fname)
     return 1

@@ -99,7 +99,7 @@ The consolidated labels are harmonized over the countries, each country voting o
 
 ## Good to know
 
-- Nothing is downloaded or written twice: existing files are kept. `--force` redoes everything. A consolidated
+- Nothing is downloaded or written twice: existing files are kept. `--force` redoes everything, and replaces datafiles saved earlier under an uppercase name (`download --force`, then `preprocess --force`). A consolidated
   file is rebuilt by itself when its countries or input files change.
 - Every step is logged to `data/ggp_client.log`. The access link never is.
 - Three GGS-I files (Australia waves 1 and 2, Norway wave 1) give "404 Not Found" on the portal itself.
