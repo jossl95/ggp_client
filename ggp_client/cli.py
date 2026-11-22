@@ -18,7 +18,7 @@ def positive(v):
 
 
 def add_access_url(ap):
-    ap.add_argument("--access-url", help="the emailed link; default: GGP_ACCESS_URL, else you are asked "
+    ap.add_argument("--access-url", help="the emailed link; default: you are asked for it, hidden "
                                          "(a flag ends up in your shell history)")
 
 

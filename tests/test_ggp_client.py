@@ -371,7 +371,6 @@ def login(tmp_path, url=None):
 
 def test_login_errors_never_leak_the_token(tmp_path, monkeypatch):
     monkeypatch.setattr("getpass.getpass", no_terminal)
-    monkeypatch.delenv("GGP_ACCESS_URL", raising=False)
     with pytest.raises(LoginError, match="no valid session"):
         login(tmp_path)
     with pytest.raises(LoginError) as e:
@@ -384,7 +383,6 @@ def test_login_errors_never_leak_the_token(tmp_path, monkeypatch):
 
 def test_login_asks_for_the_link_only_when_needed(tmp_path, monkeypatch):
     asked = []
-    monkeypatch.delenv("GGP_ACCESS_URL", raising=False)
     monkeypatch.setattr("getpass.getpass", lambda prompt: asked.append(prompt) or f"  {TOKEN}\n")
     login(tmp_path)  # no argument, no environment variable, no session: asked once
     assert len(asked) == 1 and (tmp_path / ".session.json").exists()
@@ -392,11 +390,12 @@ def test_login_asks_for_the_link_only_when_needed(tmp_path, monkeypatch):
     assert len(asked) == 1
 
 
-def test_login_uses_the_environment_variable_before_asking(tmp_path, monkeypatch):
+def test_login_ignores_an_environment_variable(tmp_path, monkeypatch):
+    # a link is valid for seven days: it is asked for, not kept in the environment
     monkeypatch.setattr("getpass.getpass", no_terminal)
     monkeypatch.setenv("GGP_ACCESS_URL", TOKEN)
-    login(tmp_path)
-    assert (tmp_path / ".session.json").exists()
+    with pytest.raises(LoginError, match="no valid session"):
+        login(tmp_path)
 
 
 def test_broken_session_file_means_log_in_again(tmp_path, monkeypatch):
@@ -437,7 +436,6 @@ def test_access_page_sections():
 
 def test_sync_without_login_still_indexes_the_public_pages(tmp_path, monkeypatch):
     monkeypatch.setattr("getpass.getpass", no_terminal)
-    monkeypatch.delenv("GGP_ACCESS_URL", raising=False)
     con = db.connect(tmp_path / "catalogue.sqlite")
 
     async def go():

@@ -53,7 +53,6 @@ class ggpClient:
         self.downloads = self.dir / "download" / "raw"
         self.processed = self.dir / "download" / "processed"
         self.consolidated = self.dir / "download" / "consolidated"
-        self.access_url = self.access_url or os.environ.get("GGP_ACCESS_URL")
         if self.concurrency < 1:
             raise ValueError("concurrency must be 1 or more")  # 0 would wait forever
         self.con = db.connect(self.dir / "catalogue.sqlite")
@@ -150,8 +149,8 @@ class ggpClient:
     async def login(self):
         """Reuse the saved session if it still works, else log in with the access link.
 
-        The link comes from the access_url argument, then the GGP_ACCESS_URL environment variable,
-        and if neither is set you are asked for it (input hidden, it works as a password).
+        The link comes from the access_url argument, else you are asked for it (input hidden, it works as a password).
+        There is no environment variable: a link is valid for seven days, so there is nothing to keep for later.
         """
         jar = self.dir / ".session.json"
         try:
@@ -171,8 +170,8 @@ class ggpClient:
             except (EOFError, OSError):  # no terminal to ask on
                 pass
         if not url:
-            raise LoginError("no valid session: pass access_url, set GGP_ACCESS_URL, or run in a terminal to be "
-                             "asked (request a fresh link by email on the portal login page)")
+            raise LoginError("no valid session: run in a terminal to paste the emailed link, or pass access_url "
+                             "(request a fresh link by email on the portal login page)")
         if not url.startswith(parse.BASE + "/"):
             raise LoginError(f"the access link must start with {parse.BASE}/")
         try:

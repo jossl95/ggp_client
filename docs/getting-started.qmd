@@ -20,11 +20,10 @@ only by you) and reused, so the link is needed once. ggp-client looks for a logi
 
 1. the saved session, if it still works;
 2. the `access_url` argument (`--access-url` on the command line);
-3. the `GGP_ACCESS_URL` environment variable;
-4. otherwise it asks. With no terminal to ask on (a scheduled job) it stops with a `LoginError`.
+3. otherwise it asks (input hidden). With no terminal to ask on (a scheduled job) it stops with a `LoginError`.
 
 ::: {.callout-warning}
-The access link works like a password. Do not commit it, and prefer the prompt or the environment variable over
+The access link works like a password and is valid for seven days. Do not commit it, and use the prompt, not
 `--access-url`, which stays in your shell history. ggp-client never writes it to its log.
 :::
 

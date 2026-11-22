@@ -20,14 +20,10 @@ use_virtualenv("ggp", required = TRUE)
 
 ## Log in
 
-Put the access link in your user-level `~/.Renviron` (`usethis::edit_r_environ()`), never in a script or project:
-
-```
-GGP_ACCESS_URL=<the link the portal emailed you>
-```
-
-Restart R. The first download saves the session in `data/.session.json`, so the link is used once. Treat it like a
-password (see [Getting started](getting-started.qmd)).
+The portal e-mails you an access link that is valid for seven days. Paste it when the first download asks for it (the
+input is hidden); there is no environment variable for it. In R, the Python package asks in the terminal, so log in
+once from a terminal first (`ggp("sync")` prompts), or use the native R package, whose `p |> ggp_login()` asks inside
+R. The session is saved in `data/.session.json` and reused, so the link is needed once.
 
 ## Download and consolidate GGS-II
 

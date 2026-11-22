@@ -15,7 +15,7 @@ ggp-client list --project ggs --round 2          # what is there (the same filte
 ```
 
 Downloading needs the access link the portal emails you. The first download asks you to paste it (the input is
-hidden), then the session is saved in `data/.session.json` and reused. You can also set `GGP_ACCESS_URL`.
+hidden), then the session is saved in `data/.session.json` and reused. The link is valid for seven days and is only asked for, never kept: there is no environment variable for it.
 Treat the link like a password: do not commit it or pass it on the command line, where it stays in your history.
 
 ## Use case: GGS-II in Stata format, consolidated to parquet
