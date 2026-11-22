@@ -19,7 +19,6 @@ website:
         - ggs-ii.qmd
         - labels.qmd
         - contract.qmd
-        - r.qmd
         - ffs.qmd
     right:
       - icon: github
