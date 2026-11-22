@@ -72,7 +72,7 @@ def main(argv=None):
     if a.cmd == "convert":  # one dataset, outside the catalogue: written next to the .SPS
         sps = Path(a.sps)
         try:
-            df, meta = processing.read_ffs(sps, read._dat(sps))
+            df, meta = processing.lower_case(*processing.read_ffs(sps, read._dat(sps)), sps.name)
         except (OSError, ValueError) as e:
             sys.exit(f"convert failed: {e}")
         for e in a.ext:

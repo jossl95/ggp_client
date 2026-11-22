@@ -67,18 +67,18 @@ dataset as a labelled Stata file (`ggs-ii_w1.dta`).
 
 ## Labels (meta.json)
 
-The parquet files hold the codes. Their labels, as pyreadstat reads them from the `.dta` and `.sav` files, are in
-the `.meta.json` next to them:
+The parquet files hold the codes, with lower-case variable names (the raw downloads keep the portal's). Their
+labels, as pyreadstat reads them from the `.dta` and `.sav` files, are in the `.meta.json` next to them;
+`ggp_client.labels` puts them back on the data:
 
 ```python
-import json
-import polars as pl
+from ggp_client import labels, read
 
-df = pl.read_parquet("data/download/consolidated/ggs-ii_w1.parquet")
-meta = json.load(open("data/download/consolidated/ggs-ii_w1.meta.json", encoding="utf-8"))
-meta["column_labels"]["dem01"]   # 'Gender'                                   variable -> variable label
-meta["value_labels"]["dem01"]    # {'1': 'Male', '2': 'Female', '3': 'Other', ...}  variable -> value -> label
-df.select(pl.col("dem01").cast(pl.Int64).cast(pl.String).replace(meta["value_labels"]["dem01"]))
+path = "data/download/consolidated/ggs-ii_w1.parquet"
+meta = labels.meta(path)                    # the meta.json next to it
+df = labels.label(read.read(path), meta)    # codes replaced by their labels (categorical columns)
+labels.variable_labels(df, meta)            # {"dem01": "Gender", ...}
+meta["value_labels"]["dem01"]               # {'1': 'Male', '2': 'Female', '3': 'Other', ...}
 ```
 
 Codes are JSON text (`"1"`); use `int(code)` to hand them back to pyreadstat (`variable_value_labels`).

@@ -465,18 +465,18 @@ def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
     (tmp_path / "USA2.DAT").write_bytes(FFS_DAT)
     assert processing.convert(tmp_path, ["sav", "dta", "csv"], "ffs_us_v1.0") == 3
     df, m = pyreadstat.read_sav(tmp_path / "ffs_us_v1.0.sav", user_missing=True)
-    assert list(df.columns) == ["COUNTRY", "HHNUM", "WEIGHT", "V004_01", "V005_01"]  # $ is not allowed in Stata
-    assert df["HHNUM"].tolist() == ["A0001", "A0002"] and df["WEIGHT"].tolist() == [0.7035, 1.2]
-    assert df["V004_01"].tolist() == [1, 98] and df["V005_01"].isna().tolist() == [False, True]  # * is missing
-    assert m.column_names_to_labels["V004_01"] == 'Born in Nieder"sterreich'  # the stray quote does not end it
-    assert m.column_names_to_labels["WEIGHT"] == "Caseweight in US$"
-    assert m.variable_value_labels["V005_01"] == m.variable_value_labels["V004_01"] == {1: "One", 98: "Missing value"}
-    assert m.variable_value_labels["COUNTRY"] == {23: "United States"}
-    assert m.missing_ranges == {"V004_01": [{"lo": 98.0, "hi": 98.0}]}
+    assert list(df.columns) == ["country", "hhnum", "weight", "v004_01", "v005_01"]  # $ is not allowed in Stata
+    assert df["hhnum"].tolist() == ["A0001", "A0002"] and df["weight"].tolist() == [0.7035, 1.2]
+    assert df["v004_01"].tolist() == [1, 98] and df["v005_01"].isna().tolist() == [False, True]  # * is missing
+    assert m.column_names_to_labels["v004_01"] == 'Born in Nieder"sterreich'  # the stray quote does not end it
+    assert m.column_names_to_labels["weight"] == "Caseweight in US$"
+    assert m.variable_value_labels["v005_01"] == m.variable_value_labels["v004_01"] == {1: "One", 98: "Missing value"}
+    assert m.variable_value_labels["country"] == {23: "United States"}
+    assert m.missing_ranges == {"v004_01": [{"lo": 98.0, "hi": 98.0}]}
     dta, md = pyreadstat.read_dta(tmp_path / "ffs_us_v1.0.dta")
-    assert md.variable_value_labels["V004_01"] == {1: "One", 98: "Missing value"}
-    assert md.column_names_to_labels["COUNTRY"] == "ISO country code"
-    assert (tmp_path / "ffs_us_v1.0.csv").read_text().splitlines()[0] == "COUNTRY,HHNUM,WEIGHT,V004_01,V005_01"
+    assert md.variable_value_labels["v004_01"] == {1: "One", 98: "Missing value"}
+    assert md.column_names_to_labels["country"] == "ISO country code"
+    assert (tmp_path / "ffs_us_v1.0.csv").read_text().splitlines()[0] == "country,hhnum,weight,v004_01,v005_01"
     (tmp_path / "ffs_us_v1.0.csv").write_text("mine")
     assert processing.convert(tmp_path, ["csv"], "ffs_us_v1.0") == 1  # exists: kept
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() == "mine"
@@ -484,7 +484,7 @@ def test_ffs_conversion_reads_dat_with_sps_labels(tmp_path):
     assert (tmp_path / "ffs_us_v1.0.csv").read_text() != "mine"
     from ggp_client import cli
     cli.main(["convert", str(tmp_path / "USA2.SPS"), "--ext", "dta"])  # one dataset, from the command line
-    assert pyreadstat.read_dta(tmp_path / "USA2.dta")[1].column_names_to_labels["COUNTRY"] == "ISO country code"
+    assert pyreadstat.read_dta(tmp_path / "USA2.dta")[1].column_names_to_labels["country"] == "ISO country code"
     (tmp_path / "nodat").mkdir()
     with pytest.raises(SystemExit, match="no .dat"):  # a clear message, not a traceback
         cli.main(["convert", str(tmp_path / "nodat" / "X.SPS")])
@@ -506,7 +506,7 @@ def test_ffs_unpack_names_like_estonia(tmp_path):
         "converted_data_est_f.dta", "converted_data_est_m.dta", "ffs_ee_v1.0_est_f.dat", "ffs_ee_v1.0_est_f.sav",
         "ffs_ee_v1.0_est_m.dat", "ffs_ee_v1.0_est_m.sav"]
     df, m = pyreadstat.read_dta(dest / "converted_data_est_f.dta")
-    assert list(df.columns) == ["IND01_01"] and m.variable_value_labels["IND01_01"] == {1: "yes", 2: "no"}
+    assert list(df.columns) == ["ind01_01"] and m.variable_value_labels["ind01_01"] == {1: "yes", 2: "no"}
 
 
 def test_download_ggs_script(tmp_path, capsys, monkeypatch):

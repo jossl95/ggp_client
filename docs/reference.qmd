@@ -42,6 +42,7 @@ select in `p.rows`. Its methods are async and return `(done, skipped, failed)` u
 |---|---|
 | `ggp_client.read` | `read(path)`, `scan(path)` (LazyFrame), `read_async(path)`, `read_all_async(paths)`, `meta(path)`: dta, sav, csv, parquet and FFS `.sps` into polars |
 | `ggp_client.processing` | `preprocess` / `preprocess_async` (to parquet), FFS: `read_ffs`, `convert`, `write` |
+| `ggp_client.labels` | `meta(path)` (a parquet's meta.json, or a dta/sav's labels), `label(df, meta)` (codes to labels), `variable_labels(df, meta)` |
 | `ggp_client.consolidate` | `consolidate` / `consolidate_async`, `merged_meta` (harmonized labels), `to_stata` / `to_stata_async` |
 
 Every module has a plain and an async version; the client uses the async ones. Scripts that call the async

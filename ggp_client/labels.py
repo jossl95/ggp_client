@@ -1,14 +1,83 @@
-"""Harmonized labels: the variable and value labels of the files of a consolidated dataset, merged into one set.
+"""Variable and value labels: put them on the data, and harmonize them over the files of a consolidated dataset.
 
-Each file has a .meta.json next to its parquet (see processing.preprocess). merged_meta() combines them, the rules
-below are the contract both the Python and the R package follow (docs/contract.qmd).
+    from ggp_client import labels, read
+    path = "data/download/consolidated/ggs-ii_w1.parquet"
+    m = labels.meta(path)                         # its meta.json
+    df = labels.label(read.read(path), m)         # codes replaced by their labels: 1 -> "Male"
+    labels.variable_labels(df, m)                 # {"dem01": "Gender", ...}
+
+Each file has a .meta.json next to its parquet (see processing.preprocess). merged_meta() combines them; its rules
+are the contract both the Python and the R package follow (docs/contract.qmd).
 """
 import json
 from collections import Counter, defaultdict
+from pathlib import Path
+
+import polars as pl
+
+from . import read
 
 
 def meta_path(parquet):
-    return parquet.with_suffix(".meta.json")
+    return Path(parquet).with_suffix(".meta.json")
+
+
+def meta(path):
+    """The labels of a data file: the .meta.json next to a parquet, or those of a dta or sav (read.meta).
+
+    None for a file without labels (csv, or a parquet without meta.json).
+    """
+    p = Path(path)
+    if p.suffix.lower() == ".parquet":
+        return json.loads(meta_path(p).read_text(encoding="utf-8")) if meta_path(p).exists() else None
+    return read.meta(p)
+
+
+def _text(v):
+    return str(int(v)) if isinstance(v, float) and v.is_integer() else str(v)  # 1.0 shows as "1"
+
+
+def _labelled(s, codes):
+    """The polars Series s with its codes replaced by their labels, as an Enum in code order."""
+    numeric = s.dtype.is_numeric()
+    found = {}
+    for k, v in codes.items():
+        try:
+            found[float(k) if numeric else str(k)] = v
+        except ValueError:  # Stata's extended missing codes (.a, .b) are not values of a numeric column
+            pass
+    values = s.drop_nulls().unique().sort().to_list()
+    new = [found.get(float(v) if numeric else str(v), _text(v)) for v in values]  # a code without a label: itself
+    enum = pl.Enum(list(dict.fromkeys([found[k] for k in sorted(found)] + new)))  # two codes may share a label
+    if not values:
+        return pl.Series(s.name, [None] * len(s), enum)
+    return s.replace_strict(values, new, return_dtype=enum)
+
+
+def label(df, meta, columns=None):
+    """df with the value labels of meta on it: every labelled column holds its labels instead of its codes.
+
+    The column becomes categorical (a polars Enum, a pandas Categorical) with the labels in the order of their codes;
+    a code without a label shows as itself ("7"), and null stays null. Unlabelled columns are left alone.
+    df: a polars or pandas DataFrame; a pandas one also gets the variable labels in df.attrs["column_labels"].
+    meta: from meta(), read.meta() or a .meta.json. columns: only these (default: all labelled columns).
+    """
+    pandas = not isinstance(df, pl.DataFrame)
+    out = pl.from_pandas(df) if pandas else df
+    value_labels = meta.get("value_labels") or meta.get("variable_value_labels") or {}
+    todo = [c for c in out.columns if value_labels.get(c) and (columns is None or c in columns)]
+    out = out.with_columns(_labelled(out[c], value_labels[c]) for c in todo)
+    if not pandas:
+        return out
+    res = out.to_pandas()
+    res.attrs["column_labels"] = variable_labels(res, meta)
+    return res
+
+
+def variable_labels(df, meta):
+    """{column: variable label} for the columns of df that have one in meta."""
+    names = meta.get("column_labels") or {}
+    return {c: names[c] for c in df.columns if names.get(c)}
 
 
 def _norm(label):

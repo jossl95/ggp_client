@@ -1,23 +1,32 @@
 ---
-title: "Labels"
+title: "Variable and value labels"
 ---
 
 Parquet holds values, not labels. ggp-client keeps the labels of every `.dta` and `.sav` file, as pyreadstat reads
-them, in a `meta.json` next to its parquet file.
+them, in a `meta.json` next to its parquet file. Variable names are lower case, in the parquet files and in their
+`meta.json` (`DEM01` in a download is `dem01`); the raw downloads keep the portal's names.
 
-## Using them
+## Putting the labels on the data
 
 ```python
-import json
-import polars as pl
+from ggp_client import labels, read
 
-df = pl.read_parquet("data/download/consolidated/ggs-ii_w1.parquet")
-meta = json.load(open("data/download/consolidated/ggs-ii_w1.meta.json", encoding="utf-8"))
+path = "data/download/consolidated/ggs-ii_w1.parquet"
+meta = labels.meta(path)                  # the meta.json next to it
+df = labels.label(read.read(path), meta)  # every labelled column holds its labels: 1 -> "Male"
+labels.variable_labels(df, meta)          # {"dem01": "Gender", ...}
+```
 
+`labels.label` turns each column with value labels into a categorical column (a polars `Enum`, or a pandas
+`Categorical` for a pandas frame), with the labels in the order of their codes. A code without a label shows as itself
+(`"7"`), and missing stays missing. `columns=["dem01"]` labels only those. A pandas frame also gets the variable
+labels, in `df.attrs["column_labels"]`. `labels.meta` also reads the labels of a `.dta` or `.sav` file.
+
+## The labels themselves
+
+```python
 meta["column_labels"]["dem01"]   # 'Gender'                                    variable -> variable label
 meta["value_labels"]["dem01"]    # {'1': 'Male', '2': 'Female', '3': 'Other', ...}  variable -> value -> label
-
-df.select(pl.col("dem01").cast(pl.Int64).cast(pl.String).replace(meta["value_labels"]["dem01"]))
 ```
 
 JSON keys are text, so codes are `"1"`, not `1`. To hand labels back to pyreadstat:

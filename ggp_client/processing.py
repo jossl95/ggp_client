@@ -9,7 +9,8 @@ COUNTRY.TBL (the published frequency tables, to check results against; not neede
 Every $ in a variable name becomes _ (Stata does not allow $): IND01$01 becomes IND01_01. Downloads also
 rewrite the raw .sps that way (see rewrite_sps), so syntax, converted files and documentation use the same names.
 Missing value codes (e.g. 98) stay in the data; sav also marks them as missing, as SPSS would.
-csv has the codes only: it cannot hold labels.
+csv has the codes only: it cannot hold labels. The converted files have lower-case variable names (ind01_01); the
+.sps keeps the portal's case, which SPSS ignores.
 
 Preprocessing saves downloaded datafiles as parquet under data_dir/download/processed, with columns that say
 where each row came from. One parquet per data file, at the same path as in download/raw, plus a .meta.json with
@@ -20,7 +21,9 @@ A file that comes in several types (dta, sav and csv of one dataset) is read onc
 FFS is read from its converted_data.dta/.sav, which the download puts in download/processed/ffs/<cc>/ already;
 a country without one is read from the raw .sps/.dat.
 Added columns: ggp_project, ggp_round, ggp_series, ggp_wave, ggp_country, ggp_version, ggp_file.
-An existing parquet (and meta.json) is kept unless force.
+Variable names are lower case in the parquet and in its meta.json (DEM01 becomes dem01); the raw downloads keep the
+portal's names. An existing parquet (and meta.json) is kept unless force, or unless it still has upper-case names
+(made by an older version).
 """
 import asyncio
 import collections
@@ -197,6 +200,26 @@ def read_ffs(sps, dat):
     return df, meta
 
 
+def lower_names(names, where):
+    """{name: lower-case name}. Two names that differ only in case cannot both be kept: ValueError."""
+    seen = {}
+    for n in names:
+        if (first := seen.setdefault(n.lower(), n)) != n:
+            raise ValueError(f"{where}: {first} and {n} differ only in case")
+    return {n: n.lower() for n in names}
+
+
+def lower_keys(meta, keys):
+    """meta with the variable names in the dicts under `keys` in lower case."""
+    return {k: {n.lower(): v for n, v in d.items()} if k in keys and d else d for k, d in meta.items()}
+
+
+def lower_case(df, meta, where):
+    """An FFS frame and its labels (read_ffs) with lower-case variable names, as the converted files have them."""
+    return (df.rename(columns=lower_names(df.columns, where)),
+            lower_keys(meta, ("column_labels", "variable_value_labels", "missing_ranges")))
+
+
 def write(df, meta, target, force=False):
     """Save as target's type (sav, dta, csv) via a temporary name; an existing file is kept unless force.
 
@@ -260,7 +283,7 @@ def convert(folder, exts, name=CONVERTED, force=False, out_dir=None):
         targets = [out / f"{base}.{e}" for e in exts]
         todo = [t for t in targets if force or not t.exists()]
         if todo:
-            df, meta = read()
+            df, meta = lower_case(*read(), src.name)
             for t in todo:
                 write(df, meta, t, force)
         n += len(targets)
@@ -352,7 +375,8 @@ def jobs(rows, root, out, force=False):
     for r in rows:
         for src, rel in sources(r, root, out):
             target = Path(out) / rel.with_suffix(".parquet")
-            if not force and target.exists() and (src.suffix.lower() not in read.LABELLED or _meta(target).exists()):
+            if (not force and target.exists() and _lower_case(target)
+                    and (src.suffix.lower() not in read.LABELLED or _meta(target).exists())):
                 skipped += 1
             else:
                 if force:  # the parquet and meta of an older, differently cased name would stay behind
@@ -362,11 +386,20 @@ def jobs(rows, root, out, force=False):
     return todo, skipped
 
 
+def _lower_case(parquet):
+    """True if every column name of the parquet is lower case; False if it is unreadable."""
+    try:
+        return all(n == n.lower() for n in pl.scan_parquet(parquet, glob=False).collect_schema().names())  # a folder may be named "[raw data]"
+    except (OSError, pl.exceptions.PolarsError):
+        return False
+
+
 def plan(src, r, rel):
-    """The LazyFrame of one file with the provenance columns; ggp_file is rel."""
+    """The LazyFrame of one file, with lower-case names and the provenance columns; ggp_file is rel."""
     tags = dict(project=r["project"], round=r["round"], series=r["series"], wave=r["wave"] or None,
                 country=r["country"] or None, version=r["version"], file=Path(rel).as_posix())
-    return read.scan(src).with_columns(pl.lit(v, pl.Int64 if k == "round" else pl.String).alias(f"ggp_{k}")
+    lf = read.scan(src)
+    return lf.rename(lower_names(lf.collect_schema().names(), Path(rel).as_posix())).with_columns(pl.lit(v, pl.Int64 if k == "round" else pl.String).alias(f"ggp_{k}")
                                        for k, v in tags.items())
 
 
@@ -375,9 +408,11 @@ def _meta(target):
 
 
 def save_meta(src, target, rel):
-    """Write target's .meta.json with the labels of src (dta, sav); nothing for other types."""
+    """Write target's .meta.json with the labels of src (dta, sav), variable names in lower case; nothing for other
+    types."""
     m = read.meta(src)
     if m is not None:
+        m = lower_keys(m, ("column_labels", "value_labels", "missing_ranges", "original_types"))
         part = target.with_suffix(".meta.part.json")
         part.write_text(json.dumps(dict(file=Path(rel).as_posix(), **m), ensure_ascii=False, indent=1),
                         encoding="utf-8")

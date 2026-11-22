@@ -1,5 +1,5 @@
 ---
-title: "Contract with the R package"
+title: "How the Python and R packages stay in step"
 ---
 
 ggp-client has a twin written natively in R, [ggpclient](https://jossl95.github.io/ggpclientR/). They are two
@@ -22,6 +22,10 @@ data/download/consolidated/<series>_<wave>.parquet  + .meta.json  (+ .dta)
 
 ## Rules both follow
 
+- **Variable names are lower case** in everything the packages write after a download: FFS conversions, parquet
+  files, their `meta.json` and consolidated files (`DEM01` becomes `dem01`). The raw downloads keep the portal's names.
+  Two names in one file that differ only in case are an error. A parquet file with upper-case names (from an older
+  version) is preprocessed again.
 - **Country-specific variables** are named `..._<GGP country number><nn>`. The number is the file's own `country`
   variable when it holds one value in 10-99, else the `COUNTRY_NUMBERS` table. They are left out of consolidated files.
 - **Labels are harmonized over the countries, each voting once** (the first file of a country):
