@@ -238,3 +238,6 @@ ggp_client.log
 *.[dD][aA][tT]
 *.[sS][pP][sS]
 *.[tT][bB][lL]
+
+# the shared test fixtures hold small .dat and .sps files
+!tests/fixtures/**
