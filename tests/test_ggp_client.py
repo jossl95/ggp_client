@@ -612,20 +612,22 @@ def test_merged_meta_harmonizes_labels(tmp_path):
     for name, var, values in [
             ("AT", "Country", {"203": "Czechia", "1": "East Austria", "3": "elementary school", "-1": "Don't know"}),
             ("HR", "Country", {"203": "czechia ", "1": "Pannonian Croatia", "4": "Elementary school", "-1": "Don't know"}),
-            ("GB", "Land", {"203": "Czech Republic", "1": "East Midlands", "-1": "don't know"})]:
+            ("GB", "Land", {"203": "Czech Republic", "1": "East Midlands", "-1": "don't know"}),
+            ("GB_RU", "Страна", {"203": "Чехия", "-1": "Не знаю"})]:  # GB's second file (a translation): no vote
         f = tmp_path / f"{name}.parquet"
         (tmp_path / f"{name}.meta.json").write_text(json.dumps(dict(
             column_labels={"cc": var, "gone": "x"}, value_labels={"cc": values})))
-        files.append((f, name, f"{name}.dta"))
+        files.append((f, name[:2], f"ggs/{name[:2].lower()}/{name}.dta"))
     files.append((tmp_path / "NL.parquet", "NL", "NL.csv"))  # csv: no meta.json, skipped
     m = consolidate.merged_meta(files, {"cc"})
     assert m["column_labels"] == {"cc": "Country"}  # the label most files use; dropped columns left out
     v = m["value_labels"]["cc"]
     assert v["203"] == "Czechia"  # majority (spelling and case variants count as one)
     assert v["1"] == "East Austria / Pannonian Croatia / East Midlands"  # no majority: all of them
-    assert v["-1"] == "Don't know"
+    assert v["-1"] == "Don't know"  # 3 of 3 countries: the Russian file does not make it a minority
     assert v["3"] == "elementary school [3]" and v["4"] == "Elementary school [4]"  # one label, two codes: tagged
     assert len({x.casefold() for x in v.values()}) == len(v)  # every label unique
-    assert m["original_labels"]["cc"]["1"] == {"East Austria": ["AT.parquet"], "Pannonian Croatia": ["HR.parquet"],
-                                               "East Midlands": ["GB.parquet"]}
+    assert m["original_labels"]["cc"]["1"] == {"East Austria": ["ggs/at/AT.dta"], "Pannonian Croatia": ["ggs/hr/HR.dta"],
+                                               "East Midlands": ["ggs/gb/GB.dta"]}
+    assert m["original_labels"]["cc"]["-1"]["Не знаю"] == ["ggs/gb/GB_RU.dta"]  # every file's wording is kept
     assert "3" not in m["original_labels"]["cc"]  # labelled one way only
