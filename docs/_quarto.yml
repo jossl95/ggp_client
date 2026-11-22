@@ -13,8 +13,8 @@ website:
       - href: index.qmd
         text: Home
       - reference.qmd
-      - title: Articles
-        contents:
+      - text: Articles
+        menu:
         - getting-started.qmd
         - ggs-ii.qmd
         - labels.qmd
