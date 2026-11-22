@@ -7,9 +7,7 @@ title: "Getting started"
 ggp-client needs Python 3.10 or later.
 
 ```bash
-git clone https://github.com/jossl95/ggp_client
-cd ggp_client
-pip install -e .
+pip install "git+https://github.com/jossl95/ggp_client"
 ```
 
 ## Log in
