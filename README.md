@@ -88,7 +88,7 @@ The consolidated labels are harmonized over the countries, each country voting o
 
 ## Other data
 
-- **R**: use it through reticulate, see the [docs](https://jossl95.github.io/ggp_client/r.html).
+- **R**: use the native R package [ggpclientR](https://github.com/jossl95/ggpclientR) (`pak::pak("jossl95/ggpclientR")`, [docs](https://jossl95.github.io/ggpclientR/)).
 - **FFS** comes as fixed-width `.dat` with SPSS syntax (`.sps`) and frequency tables (`.tbl`), kept in
   `download/raw/ffs/<cc>/`. The download also converts it, with labels, to `download/processed/ffs/<cc>/converted_data.dta`
   (`--ext sav` for `.sav`). In SPSS you can run the `.sps` itself. One dataset by hand: `ggp-client convert AUSTRIA.SPS --ext dta`.
