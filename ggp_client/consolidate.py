@@ -123,8 +123,8 @@ def merged_meta(files, columns):
     Each country has one vote, that of its first file: Belarus ships GGS-II wave 1 in English and in Russian.
     Variable label: the one most countries use. Value labels, per variable: a code gets the label more than half of
     the countries that label it use; with no such majority, all their labels joined by " / " (most used first).
-    A label left on several codes gets its code added, "elementary school [2102]", so every code and every label is
-    unique. Codes are never changed. original_labels keeps, for every code labelled differently in any file, each
+    So every value has exactly one label; several values may share one (2102 and 3103 "Elementary school").
+    Codes are never changed. original_labels keeps, for every code labelled differently in any file, each
     wording and the source files (under download/raw, or download/processed for FFS) that use it.
     """
     names, labels = defaultdict(list), defaultdict(lambda: defaultdict(list))  # labels[var][code] = [(label, src, voter)]
@@ -155,8 +155,7 @@ def merged_meta(files, columns):
                     orig[v].append(f)
                 out["original_labels"].setdefault(c, {})[k] = dict(orig)
             d[k] = label
-        shared = Counter(_norm(v) for v in d.values())
-        out["value_labels"][c] = {k: f"{v} [{k}]" if shared[_norm(v)] > 1 else v for k, v in d.items()}
+        out["value_labels"][c] = d
     return out
 
 

@@ -625,8 +625,8 @@ def test_merged_meta_harmonizes_labels(tmp_path):
     assert v["203"] == "Czechia"  # majority (spelling and case variants count as one)
     assert v["1"] == "East Austria / Pannonian Croatia / East Midlands"  # no majority: all of them
     assert v["-1"] == "Don't know"  # 3 of 3 countries: the Russian file does not make it a minority
-    assert v["3"] == "elementary school [3]" and v["4"] == "Elementary school [4]"  # one label, two codes: tagged
-    assert len({x.casefold() for x in v.values()}) == len(v)  # every label unique
+    assert v["3"] == "elementary school" and v["4"] == "Elementary school"  # two values may share a label
+    assert all(isinstance(x, str) for x in v.values())  # every value has exactly one label
     assert m["original_labels"]["cc"]["1"] == {"East Austria": ["ggs/at/AT.dta"], "Pannonian Croatia": ["ggs/hr/HR.dta"],
                                                "East Midlands": ["ggs/gb/GB.dta"]}
     assert m["original_labels"]["cc"]["-1"]["Не знаю"] == ["ggs/gb/GB_RU.dta"]  # every file's wording is kept
