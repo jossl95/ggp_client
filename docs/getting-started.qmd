@@ -17,64 +17,89 @@ download asks you to paste it; the input is hidden. The session is then saved in
 only by you) and reused, so the link is needed once. ggp-client looks for a login in this order:
 
 1. the saved session, if it still works;
-2. the `access_url` argument (`--access-url` on the command line);
+2. the `access_url` argument of `ggpClient`;
 3. otherwise it asks (input hidden). With no terminal to ask on (a scheduled job) it stops with a `LoginError`.
 
 ::: {.callout-warning}
-The access link works like a password and is valid for seven days. Do not commit it, and use the prompt, not
-`--access-url`, which stays in your shell history. ggp-client never writes it to its log.
+The access link works like a password and is valid for seven days. Do not commit it, and use the prompt rather
+than writing it into a script as `access_url`. ggp-client never writes it to its log.
 :::
+
+## A first script
+
+```python
+import asyncio
+from ggp_client import ggpClient
+
+async def main():
+    async with ggpClient(project="ggs", round=2, country=["nl", "at"]) as p:
+        await p.sync()                  # index the portal into data/catalogue.sqlite
+        for r in p.rows:                # the files the filters select
+            print(r["id"], r["series"], r["wave"], r["country"], r["version"], r["size_mb"])
+        await p.download(ext="dta")     # Stata files only
+        await p.preprocess()            # each data file to parquet + meta.json
+        await p.consolidate()           # one dataset per round and wave
+
+if __name__ == "__main__":  # needed: preprocessing runs in worker processes
+    asyncio.run(main())
+```
+
+`ggpClient` is asynchronous: open it with `async with`, inside an `async def` that `asyncio.run` starts. Every step
+is logged, with time stamps, to `data/ggp_client.log`; `data_dir="elsewhere"` puts the catalogue, the session, the
+log and the downloads somewhere else.
 
 ## Index the portal
 
-```bash
-ggp-client sync                                     # all datasets into data/catalogue.sqlite
-ggp-client list                                     # everything
-ggp-client list --project ggs --round 2 --country nl at
-ggp-client list --ids 10-25                         # by catalogue id
-```
+`await p.sync()` reads the public dataset pages, then logs in to add the Harmonized Histories and Additional
+Datasets, which the portal lists only on the logged-in data access page. Without a login it indexes the rest and
+reports what it skipped. It returns `(found, failed)`.
 
-`sync` reads the public dataset pages, then logs in to add the Harmonized Histories and Additional Datasets,
-which the portal lists only on the logged-in data access page. Without a login it indexes the rest and says
-what it skipped.
+The catalogue is a SQLite database, open as `p.con`. `p.rows` holds the files that match the client's filters,
+refreshed after `sync` and `download`; each row works like a dict, with `id`, `series`, `wave`, `country`,
+`version`, `size_mb`, `local_path` and the other catalogue columns.
 
 ## Filters
 
-`list`, `download`, `preprocess` and `consolidate` take the same filters. Each takes one value, several, or
-nothing (all). Case does not matter, and a value that is not in the catalogue is an error, not an empty result.
+The filters are arguments of `ggpClient`. Each takes one value, a list, or `None` (all). Case does not matter,
+and a value that is not in the catalogue raises a `ValueError` instead of selecting nothing.
 
-| filter | values |
+| argument | values |
 |---|---|
-| `--project` | `ggs`, `ffs`, `hh` (Harmonized Histories), `other` (Additional Datasets), `teaching` |
-| `--round` | `1`, `2` (or `i`, `ii`) |
-| `--wave` | `w1`, `w2`, `w3`, `pilot`, ...; for `hh` and `other` the dataset name, e.g. `nkps` |
-| `--country` | two-letter codes: `nl`, `at`, ... |
-| `--ids` | catalogue ids and ranges: `3-12,20` |
-| `--all-versions` | also superseded versions (default: the latest only) |
+| `project` | `"ggs"`, `"ffs"`, `"hh"` (Harmonized Histories), `"other"` (Additional Datasets), `"teaching"` |
+| `round` | `1`, `2` (or `"i"`, `"ii"`) |
+| `wave` | `"w1"`, `"w2"`, `"w3"`, `"pilot"`, ...; for `hh` and `other` the dataset name, e.g. `"nkps"` |
+| `country` | two-letter codes: `"nl"`, `["nl", "at"]`, ... |
+| `ids` | catalogue id ranges: `[(3, 12), (20, 20)]` |
+| `all_versions` | `True`: also superseded versions (default: the latest only) |
 
-Run `list` first: it shows what the other commands will work on.
+Look at `p.rows` first: it shows what `download`, `preprocess` and `consolidate` will work on. Each of them also
+takes `rows=` to work on other rows than the client's.
 
 ## Download
 
-```bash
-ggp-client download                              # everything, latest versions, data files only
-ggp-client download --project ggs --round 2 --wave w1 --country nl
-ggp-client download --ext dta                    # only Stata files (dta, sav, csv: one or several)
-ggp-client download --metadata                   # also codebooks, readmes and other documents
-ggp-client download --force                      # download again and overwrite
+```python
+async with ggpClient(project="ggs", round=2, wave="w1", country="nl") as p:
+    await p.download()                    # data files only (dta, sav and csv), latest versions
+    await p.download(ext=["dta", "sav"])  # only these types
+    await p.download(metadata=True)       # also codebooks, readmes and other documents
+
+async with ggpClient(project="ggs", round=2, force=True) as p:
+    await p.download()                    # download again and overwrite
 ```
 
-Archives (zip, and 7z for most GGS-I wave 1 files and the Harmonized Histories) are unpacked into one folder per
-file, keeping their structure; an archive inside the archive becomes a folder. Existing files are never
-overwritten, so your own changes survive; asking for more later (another `--ext`, or `--metadata`) adds the
-missing files. A download with no matching file is reported as failed and leaves nothing behind.
+Each call returns `(done, skipped, failed)`. Archives (zip, and 7z for most GGS-I wave 1 files and the Harmonized
+Histories) are unpacked into one folder per file, keeping their structure; an archive inside the archive becomes a
+folder. Existing files are never overwritten, so your own changes survive; asking for more later (another `ext`,
+or `metadata=True`) adds the missing files. A download with no matching file is reported as failed and leaves
+nothing behind.
 
 ## Then
 
-```bash
-ggp-client preprocess  --project ggs --round 2   # each data file to parquet + meta.json
-ggp-client consolidate --project ggs --round 2   # one dataset per round and wave
+```python
+async with ggpClient(project="ggs", round=2) as p:
+    await p.preprocess()   # each data file to parquet + meta.json
+    await p.consolidate()  # one dataset per round and wave
 ```
 
-See the [GGS-II use case](ggs-ii.qmd) for what these produce. Every step is logged, with time stamps, to
-`data/ggp_client.log`.
+See the [GGS-II use case](ggs-ii.qmd) for what these produce, and the [reference](reference.qmd) for every
+argument and for the same steps as `ggp-client` commands on the command line.
