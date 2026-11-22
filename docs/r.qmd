@@ -2,6 +2,10 @@
 title: "Use from R"
 ---
 
+::: {.callout-note}
+There is also a native R version, [ggpclient](https://jossl95.github.io/ggpclientR/), with the same steps, folders and files (see the [contract](contract.qmd)). This page is for using the Python package from R.
+:::
+
 ggp-client is a Python package. From R you can use it with [reticulate](https://rstudio.github.io/reticulate/):
 the downloading and consolidating run as ggp-client commands, and you read the result in R, with its labels.
 
