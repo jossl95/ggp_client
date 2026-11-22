@@ -53,23 +53,26 @@ def scan(path):
     return read(p).lazy()
 
 
-def _as(df, output):
-    """df (polars or pandas) as `output`: narwhals converts, whatever it was read as."""
+def _check(output):
     if output not in OUTPUTS:
         raise ValueError(f"output must be one of {', '.join(OUTPUTS)}, not {output!r}")
+
+
+def _as(df, output):
+    """df (polars or pandas) as `output`: narwhals converts, whatever it was read as."""
+    _check(output)
     frame = nw.from_native(df)
     return frame.to_pandas() if output == "pandas" else frame.to_polars()
 
 
 def read(path, output="polars"):
     """A DataFrame of the file, polars (default) or pandas."""
+    _check(output)
     p = Path(path)
     s = p.suffix.lower()
     if s in LAZY:
         return _as(scan(p).collect(), output)
     if s in LABELLED:
-        if output not in OUTPUTS:
-            _as(None, output)  # the same error for every type
         return _readstat(p, output_format=output)[0]  # pyreadstat makes either frame itself
     if s == ".sps":
         from .processing import read_ffs  # here, not at the top: processing imports this module

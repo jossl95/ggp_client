@@ -68,3 +68,13 @@ def test_meta_reads_the_meta_json_next_to_a_parquet(tmp_path):
     labels.meta_path(pq).write_text(json.dumps(META))
     assert labels.meta(pq) == META
     assert labels.label(pl.read_parquet(pq), labels.meta(pq))["edu"].to_list() == ["Elementary school"]
+
+
+def test_consolidating_into_a_folder_with_brackets(tmp_path):
+    from ggp_client import consolidate
+    out = tmp_path / "data [2025]"  # brackets are a glob pattern to polars unless told otherwise
+    out.mkdir()
+    pl.DataFrame({"age": [30]}).write_parquet(out / "ggs-ii_w1.part.parquet")
+    consolidate._done(out, "ggs-ii_w1", [(tmp_path / "at.parquet", "AT", "at.dta")])
+    assert pl.read_parquet(out / "ggs-ii_w1.parquet", glob=False)["age"].to_list() == [30]
+    assert json.loads((out / "ggs-ii_w1.meta.json").read_text())["column_labels"] == {}

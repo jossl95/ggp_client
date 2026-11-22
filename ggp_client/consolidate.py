@@ -104,7 +104,7 @@ _meta = labels.meta_path
 
 def _done(out, name, files):
     target = out / f"{name}.parquet"
-    columns = set(pl.read_parquet_schema(out / f"{name}.part.parquet"))
+    columns = set(pl.scan_parquet(out / f"{name}.part.parquet", glob=False).collect_schema().names())  # [ ] in a folder name is no pattern
     _meta(target).write_text(json.dumps(labels.merged_meta(files, columns), ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(out / f"{name}.part.parquet", target)  # last: a parquet without its meta.json is never current
     log.info("consolidated %d files into %s.parquet", len(files), name)
