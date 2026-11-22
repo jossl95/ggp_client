@@ -1,10 +1,10 @@
 """Read a downloaded datafile into polars: .parquet, .dta, .sav, .csv, or an FFS .sps (with its .dat).
 
-    df = read("GGSII_Wave1_AT_V_1_1.dta")          # polars DataFrame
-    lf = scan("GGSII_Wave1_AT_V_1_1.parquet")      # polars LazyFrame
-    df = await read_async("GGSII_Wave1_AT_V_1_1.sav")
+    df = read("ggsii_wave1_at_v_1_1.dta")          # polars DataFrame
+    lf = scan("ggsii_wave1_at_v_1_1.parquet")      # polars LazyFrame
+    df = await read_async("ggsii_wave1_at_v_1_1.sav")
     dfs = await read_all_async([...], concurrency=4)   # several files at once
-    m = meta("GGSII_Wave1_AT_V_1_1.dta")           # variable and value labels (dta and sav)
+    m = meta("ggsii_wave1_at_v_1_1.dta")           # variable and value labels (dta and sav)
 
 Values are the codes; value labels are not applied. In .sav, values SPSS marks as missing are null.
 """

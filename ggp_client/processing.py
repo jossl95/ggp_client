@@ -14,8 +14,8 @@ csv has the codes only: it cannot hold labels.
 Preprocessing saves downloaded datafiles as parquet under data_dir/download/processed, with columns that say
 where each row came from. One parquet per data file, at the same path as in download/raw, plus a .meta.json with
 its labels (dta and sav):
-download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/GGSII_Wave1_AT_V_1_1.dta ->
-    download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/GGSII_Wave1_AT_V_1_1.parquet and GGSII_Wave1_AT_V_1_1.meta.json
+download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/ggsii_wave1_at_v_1_1.dta ->
+    download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/x/ggsii_wave1_at_v_1_1.parquet and ggsii_wave1_at_v_1_1.meta.json
 A file that comes in several types (dta, sav and csv of one dataset) is read once, in the order of read.FORMATS.
 FFS is read from its converted_data.dta/.sav, which the download puts in download/processed/ffs/<cc>/ already;
 a country without one is read from the raw .sps/.dat.

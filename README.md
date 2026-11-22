@@ -46,9 +46,9 @@ if __name__ == "__main__":  # needed: preprocessing runs in worker processes
 Result, in `data/`:
 
 ```
-download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/.../GGSII_Wave1_AT_V_1_1.dta          as downloaded
-download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/.../GGSII_Wave1_AT_V_1_1.parquet one file as parquet
-download/processed/.../GGSII_Wave1_AT_V_1_1.meta.json                           its labels
+download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1/.../ggsii_wave1_at_v_1_1.dta          as downloaded
+download/processed/ggs-ii/w1/at/ggs2_w1_at_v1.1/.../ggsii_wave1_at_v_1_1.parquet one file as parquet
+download/processed/.../ggsii_wave1_at_v_1_1.meta.json                           its labels
 download/consolidated/ggs-ii_w1.parquet                                         all countries of wave 1
 download/consolidated/ggs-ii_w1.meta.json                                       their harmonized labels
 ```
@@ -88,6 +88,7 @@ The consolidated labels are harmonized over the countries, each country voting o
 
 ## Other data
 
+- **R**: use it through reticulate, see the [docs](https://jossl95.github.io/ggp_client/r.html).
 - **FFS** comes as fixed-width `.dat` with SPSS syntax (`.sps`) and frequency tables (`.tbl`), kept in
   `download/raw/ffs/<cc>/`. The download also converts it, with labels, to `download/processed/ffs/<cc>/converted_data.dta`
   (`--ext sav` for `.sav`). In SPSS you can run the `.sps` itself. One dataset by hand: `ggp-client convert AUSTRIA.SPS --ext dta`.

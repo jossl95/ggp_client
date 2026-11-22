@@ -28,6 +28,11 @@ def _suffix(name):
     return Path(name).suffix.lstrip(".").lower()
 
 
+def _fname(name):
+    """Datafiles (dta, sav, csv) are saved in lower case, like the folders; documents keep their names."""
+    return name.lower() if _suffix(name) in DATA_EXT else name
+
+
 def _parts(name):
     """Archive member path as folder/file parts, or None if it could escape the target folder."""
     p = PurePosixPath(name.replace("\\", "/"))
@@ -76,7 +81,7 @@ def _write(src, target):
 def unpack(path, dest, ext, metadata, force=False, depth=0):
     """Extract the wanted members of the archive at path into dest; a nested archive becomes a folder named after it.
 
-    Folder names are lowercased, file names are kept. A file that already exists is left as it is
+    Folder and datafile names are lowercased, other file names are kept. A file that already exists is left as it is
     unless force. Returns the number of matching files (written or already there).
     """
     n = 0
@@ -92,7 +97,7 @@ def unpack(path, dest, ext, metadata, force=False, depth=0):
                     n += unpack(inner, folder / Path(fname).stem.lower(), ext, metadata, force, depth + 1)
                     continue
         if wanted(suffix, ext, metadata):
-            target = folder / fname
+            target = folder / _fname(fname)
             if force or not target.exists():
                 folder.mkdir(parents=True, exist_ok=True)
                 with opener() as src:
@@ -106,7 +111,7 @@ def unpack_file(path, name, dest, ext, metadata, force=False):
     if is_archive(path):
         return unpack(path, dest, ext, metadata, force)
     parts = _parts(name)
-    fname = parts[-1] if parts else "download"
+    fname = _fname(parts[-1]) if parts else "download"
     if not wanted(_suffix(fname), ext, metadata):
         return 0
     if force or not (dest / fname).exists():
