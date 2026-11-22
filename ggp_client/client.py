@@ -61,7 +61,7 @@ class ggpClient:
         self.sem = asyncio.Semaphore(self.concurrency)
         self.client = httpx.AsyncClient(
             base_url=parse.BASE, follow_redirects=True, timeout=60,
-            transport=self.transport, headers={"User-Agent": "ggp-client/0.1"},
+            transport=self.transport, headers={"User-Agent": "ggp-client/0.2"},
         )
         self._log_file = logging.FileHandler(self.dir / "ggp_client.log", encoding="utf-8")
         self._log_file.setFormatter(logging.Formatter(LOG_FORMAT))

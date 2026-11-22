@@ -89,7 +89,8 @@ async with ggpClient(project="ggs", round=2, force=True) as p:
 
 Each call returns `(done, skipped, failed)`. Archives (zip, and 7z for most GGS-I wave 1 files and the Harmonized
 Histories) are unpacked into the country folder: each datafile is named after its dataset
-(`download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1.dta`), and documents go into a folder of that name. Existing files are never overwritten, so your own changes survive; asking for more later (another `ext`,
+(`download/raw/ggs-ii/w1/at/ggs2_w1_at_v1.1.dta`), and documents go into a folder of that name.
+Existing files are never overwritten, so your own changes survive; asking for more later (another `ext`,
 or `metadata=True`) adds the missing files. A download with no matching file is reported as failed and leaves
 nothing behind.
 
