@@ -12,10 +12,10 @@ website:
     left:
       - href: index.qmd
         text: Home
+      - getting-started.qmd
       - reference.qmd
       - text: Articles
         menu:
-        - getting-started.qmd
         - ggs-ii.qmd
         - labels.qmd
         - contract.qmd
